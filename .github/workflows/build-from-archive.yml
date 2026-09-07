@@ -38,6 +38,7 @@ jobs:
           p=Path('app/src/main/assets/index.html')
           s=p.read_text().replace('优先使用 APK 内置 Ruffle；只有构建时未打包 Ruffle 才会尝试联网备用源。','Ruffle 与 Final 本体均随 APK 内置；正常启动完全离线，联网仅用于可选修复 / 更换本体。')
           s=s.replace('从左上角菜单选择“智能获取本体”或“导入 / 替换原版 SWF”。','从左上角菜单选择“修复 / 更换本体”，或手动导入 SWF / FINAL.exe / Final.zip。')
+          s=s.replace('window.__REVA_PLAYER_READY__=true;','window.__REVA_PLAYER_READY__=true; console.log(\'REVA_GAME_READY\');')
           p.write_text(s)
           PY
           cp "$GITHUB_WORKSPACE/v1.2/check_project.py" tools/check_project.py
