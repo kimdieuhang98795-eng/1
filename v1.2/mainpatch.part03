@@ -1,0 +1,78 @@
++            // Four subtle direction notches make the stick readable without looking like keyboard arrows.
++            stroke.setStrokeWidth(3f*sc); stroke.setColor(0x66FFFFFF);
++            float nr=joyR*0.72f, s=8f*sc;
++            c.drawLine(joyX-nr,joyY,joyX-nr+s,joyY,stroke); c.drawLine(joyX+nr-s,joyY,joyX+nr,joyY,stroke);
++            c.drawLine(joyX,joyY-nr,joyX,joyY-nr+s,stroke); c.drawLine(joyX,joyY+nr-s,joyX,joyY+nr,stroke);
++            fill.setColor(joystickPid>=0?0xD5BCA35F:0xB72A2E36); c.drawCircle(knobX,knobY,46f*sc,fill);
++            stroke.setStrokeWidth(2f*sc); stroke.setColor(joystickPid>=0?0xFFF0D78B:0x99FFFFFF); c.drawCircle(knobX,knobY,46f*sc,stroke);
++        }
++
++        void drawButton(Canvas c,B b){
++            boolean circle=Math.abs(b.r.width()-b.r.height())<3*sc;
++            fill.setColor(b.active?0xE6D6C07E:baseColor(b));
++            stroke.setStrokeWidth((b.active?3.3f:2.0f)*sc);
++            stroke.setColor(b.active?0xFFFFE4A0:0xBBD8C895);
++            if(circle){ c.drawOval(b.r,fill); c.drawOval(b.r,stroke); }
++            else { c.drawRoundRect(b.r,16*sc,16*sc,fill); c.drawRoundRect(b.r,16*sc,16*sc,stroke); }
++
++            if(b.mode==MODE_PULSE && b.label.length()==1 && Character.isLetter(b.label.charAt(0)) && !"CZV".contains(b.label)) drawSkillMark(c,b);
++            text.setColor(b.active?0xFF17140D:Color.WHITE);
++            float mainSize=(b.label.equals("X")?28:(b.caption.length()>3?12:19))*sc;
++            text.setTextSize(mainSize);
++            Paint.FontMetrics fm=text.getFontMetrics();
++            float ty=b.r.centerY()-(fm.ascent+fm.descent)/2f;
++            c.drawText(b.caption,b.r.centerX(),ty,text);
++            if(!b.caption.equals(b.label) && !b.label.equals("X") && !b.label.equals("C") && !b.label.equals("Z") && !b.label.equals("V")) {
++                text.setTextSize(8.5f*sc); text.setTextAlign(Paint.Align.RIGHT); text.setColor(0xCCFFFFFF);
++                c.drawText(b.label,b.r.right-6*sc,b.r.bottom-5*sc,text); text.setTextAlign(Paint.Align.CENTER);
++            }
++        }
++
++        void drawSkillMark(Canvas c,B b){
++            icon.setStyle(Paint.Style.STROKE); icon.setStrokeWidth(2.2f*sc); icon.setColor(0x55FFFFFF);
++            float cx=b.r.centerX(),cy=b.r.centerY(),r=b.r.width()*0.24f;
++            c.drawLine(cx-r,cy+r,cx+r,cy-r,icon);
++            c.drawLine(cx-r*0.9f,cy-r*0.2f,cx-r*0.25f,cy-r*0.85f,icon);
++            c.drawLine(cx+r*0.2f,cy+r*0.85f,cx+r*0.85f,cy+r*0.2f,icon);
++        }
++
++        B hitButton(float x,float y){
++            float slop=9f*sc;
++            for(int i=buttons.size()-1;i>=0;i--){
++                B b=buttons.get(i);
++                if(x>=b.r.left-slop&&x<=b.r.right+slop&&y>=b.r.top-slop&&y<=b.r.bottom+slop)return b;
+             }
++            return null;
+         }
++        boolean hitJoystick(float x,float y){ float dx=x-joyX,dy=y-joyY; return dx*dx+dy*dy <= (joyR*1.12f)*(joyR*1.12f); }
+ 
+-        B hit(float x,float y){ for(int i=buttons.size()-1;i>=0;i--){B b=buttons.get(i);if(b.r.contains(x,y))return b;}return null; }
+         void pressPointer(int pid,float x,float y){
+-            B b=hit(x,y); if(b==null)return;
+-            if(b.special){ skillGroup=(skillGroup+1)%3; performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); rebuild(); return; }
+-            pointerMap.put(pid,b); if(!b.active){b.active=true;send(b.label,true);performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);invalidate();}
++            if(joystickPid<0 && hitJoystick(x,y)) {
++                joystickPid=pid; updateJoystick(x,y); performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); invalidate(); return;
++            }
++            B b=hitButton(x,y); if(b==null)return;
++            pointerMap.put(pid,b);
++            if(b.mode==MODE_PAGE){ skillGroup=(skillGroup+1)%skillGroups.length; performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); rebuild(); return; }
++            if(b.mode==MODE_PULSE){
++                if(!b.active){ b.active=true; pulse(b.label); performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); invalidate();
++                    postDelayed(()->{b.active=false;invalidate();},95L); }
++                android.util.Log.i("REVA_TOUCH","PULSE:"+b.label+":pid="+pid);
++                return;
++            }
++            if(!b.active){ b.active=true; send(b.label,true); performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); invalidate(); }
++            android.util.Log.i("REVA_TOUCH","PRESS:"+b.label+":pid="+pid);
+         }
++
+         void releasePointer(int pid){
+-            B b=pointerMap.get(pid); if(b==null)return; pointerMap.remove(pid);
+-            boolean still=false; for(int i=0;i<pointerMap.size();i++) if(pointerMap.valueAt(i)==b){still=true;break;}
+-            if(!still && b.active){b.active=false;send(b.label,false);invalidate();}
+-        }
+-        void movePointer(int pid,float x,float y){
+-            B old=pointerMap.get(pid); B now=hit(x,y);
+-            if(old==now)return; releasePointer(pid); if(now!=null&&!now.special) pressPointer(pid,x,y);
++            if(pid==joystickPid){ releaseJoystick(); return; }
