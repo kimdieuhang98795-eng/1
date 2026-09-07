@@ -1,4 +1,4 @@
-name: Build Reva Android v1.2 Offline APK
+name: Build Reva Android v1.3 Input Fix APK
 
 permissions:
   contents: read
@@ -13,12 +13,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 60
     steps:
-      - name: Checkout bootstrap and v1.2 patches
+      - name: Checkout source bootstrap and patches
         uses: actions/checkout@v4
 
-      - name: Reassemble v1.1 baseline and apply verified v1.2 patch
+      - name: Reassemble baseline and apply v1.2 + v1.3 patches
         run: |
           set -euo pipefail
           cat archive/part00 archive/part01 archive/part02 archive/part03 archive/part04 archive/part05 archive/part06 archive/part07 archive/part08 > /tmp/reva.zip.b64
@@ -30,10 +30,11 @@ jobs:
           cd work/reva_android_wrapper_v1_1
           cat "$GITHUB_WORKSPACE"/v1.2/mainpatch.part* > /tmp/v12-main.patch
           patch -p0 --fuzz=0 < /tmp/v12-main.patch
+          patch -p0 --fuzz=0 < "$GITHUB_WORKSPACE/v1.3/main.patch"
           python3 - <<'PY'
           from pathlib import Path
           p=Path('app/build.gradle')
-          s=p.read_text().replace('versionCode 11','versionCode 12').replace("versionName '1.1'","versionName '1.2'")
+          s=p.read_text().replace('versionCode 11','versionCode 13').replace("versionName '1.1'","versionName '1.3'")
           p.write_text(s)
           p=Path('app/src/main/assets/index.html')
           s=p.read_text().replace('优先使用 APK 内置 Ruffle；只有构建时未打包 Ruffle 才会尝试联网备用源。','Ruffle 与 Final 本体均随 APK 内置；正常启动完全离线，联网仅用于可选修复 / 更换本体。')
@@ -41,11 +42,12 @@ jobs:
           s=s.replace('window.__REVA_PLAYER_READY__=true;','window.__REVA_PLAYER_READY__=true; console.log(\'REVA_GAME_READY\');')
           p.write_text(s)
           PY
-          cp "$GITHUB_WORKSPACE/v1.2/check_project.py" tools/check_project.py
-          cp "$GITHUB_WORKSPACE/v1.2/emulator_smoke.sh" tools/emulator_smoke.sh
+          cp "$GITHUB_WORKSPACE/v1.3/qa_nav.html" app/src/main/assets/qa_nav.html
+          cp "$GITHUB_WORKSPACE/v1.3/check_project.py" tools/check_project.py
+          cp "$GITHUB_WORKSPACE/v1.3/emulator_smoke.sh" tools/emulator_smoke.sh
           chmod +x tools/check_project.py tools/emulator_smoke.sh
           cd ..
-          mv reva_android_wrapper_v1_1 reva_android_wrapper_v1_2
+          mv reva_android_wrapper_v1_1 reva_android_wrapper_v1_3
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -65,7 +67,7 @@ jobs:
           gradle-version: '8.11.1'
 
       - name: Bundle pinned Ruffle self-hosted
-        working-directory: work/reva_android_wrapper_v1_2
+        working-directory: work/reva_android_wrapper_v1_3
         run: |
           set -euo pipefail
           mkdir -p app/src/main/assets/ruffle /tmp/ruffle_pkg
@@ -75,13 +77,12 @@ jobs:
           test -f app/src/main/assets/ruffle/ruffle.js
           find app/src/main/assets/ruffle -maxdepth 1 -name '*.wasm' -print -quit | grep .
 
-      - name: Bundle Final SWF for one-install offline play
-        working-directory: work/reva_android_wrapper_v1_2
+      - name: Bundle Final SWF for offline play
+        working-directory: work/reva_android_wrapper_v1_3
         run: |
           set -euo pipefail
           rm -f app/src/main/assets/game.swf app/src/main/assets/game.swf.part
           if ! python3 tools/fetch_original.py app/src/main/assets/game.swf; then
-            echo 'stdlib Drive fetch failed; retrying with gdown'
             python3 -m pip install --disable-pip-version-check -q gdown
             gdown 'https://drive.google.com/uc?id=1iNaM6v8hvgJJcHXxL2TcNf12eubqgRDJ' -O app/src/main/assets/game.swf
           fi
@@ -89,26 +90,26 @@ jobs:
           test "$(wc -c < app/src/main/assets/game.swf)" -ge 31457280
 
       - name: Run full local QA
-        working-directory: work/reva_android_wrapper_v1_2
+        working-directory: work/reva_android_wrapper_v1_3
         run: bash qa/run_local_qa.sh
 
       - name: Build debug APK
-        working-directory: work/reva_android_wrapper_v1_2
+        working-directory: work/reva_android_wrapper_v1_3
         run: gradle --no-daemon assembleDebug
 
       - name: Inspect APK contents and metadata
-        working-directory: work/reva_android_wrapper_v1_2
+        working-directory: work/reva_android_wrapper_v1_3
         run: |
           set -euo pipefail
           APK=app/build/outputs/apk/debug/app-debug.apk
           test -f "$APK"
           sha256sum "$APK" | tee app-debug.apk.sha256
           unzip -l "$APK" | tee apk-files.txt
-          grep -E 'assets/game.swf|assets/ruffle/ruffle.js|assets/ruffle/.*\.wasm' apk-files.txt
+          grep -E 'assets/game.swf|assets/ruffle/ruffle.js|assets/ruffle/.*\.wasm|assets/qa_nav.html' apk-files.txt
           awk '$4=="assets/game.swf" { if ($1 < 31457280) exit 1; found=1 } END { if (!found) exit 1 }' apk-files.txt
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee apk-badging.txt
           grep -q "package: name='com.ajiu.reva'" apk-badging.txt
-          grep -q "versionName='1.2'" apk-badging.txt
+          grep -q "versionName='1.3'" apk-badging.txt
           grep -q "targetSdkVersion:'35'" apk-badging.txt
 
       - name: Enable KVM access
@@ -130,18 +131,18 @@ jobs:
           disable-animations: true
           script: |
             adb shell settings put secure immersive_mode_confirmations confirmed || true
-            bash work/reva_android_wrapper_v1_2/tools/emulator_smoke.sh work/reva_android_wrapper_v1_2/app/build/outputs/apk/debug/app-debug.apk work/reva_android_wrapper_v1_2/qa/emulator
+            bash work/reva_android_wrapper_v1_3/tools/emulator_smoke.sh work/reva_android_wrapper_v1_3/app/build/outputs/apk/debug/app-debug.apk work/reva_android_wrapper_v1_3/qa/emulator
 
       - name: Upload APK and QA evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: reva-android-v1.2-offline
+          name: reva-android-v1.3-input-fix
           if-no-files-found: warn
           path: |
-            work/reva_android_wrapper_v1_2/app/build/outputs/apk/debug/app-debug.apk
-            work/reva_android_wrapper_v1_2/app-debug.apk.sha256
-            work/reva_android_wrapper_v1_2/apk-badging.txt
-            work/reva_android_wrapper_v1_2/apk-files.txt
-            work/reva_android_wrapper_v1_2/bundled-game.txt
-            work/reva_android_wrapper_v1_2/qa/emulator/**
+            work/reva_android_wrapper_v1_3/app/build/outputs/apk/debug/app-debug.apk
+            work/reva_android_wrapper_v1_3/app-debug.apk.sha256
+            work/reva_android_wrapper_v1_3/apk-badging.txt
+            work/reva_android_wrapper_v1_3/apk-files.txt
+            work/reva_android_wrapper_v1_3/bundled-game.txt
+            work/reva_android_wrapper_v1_3/qa/emulator/**
