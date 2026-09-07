@@ -72,28 +72,29 @@ jobs:
           s=p.read_text()
           start=s.index('# Read the actual rotated screenshot size')
           end=s.index('# Then launch the normal app path')
-          replacement=r'''# Ask the actual native overlay for X's absolute on-screen rectangle instead of
-# guessing through screenshot/orientation math. This catches letterboxing/insets too.
-adb logcat -d REVA_TOUCH:I '*:S' > "$OUT_DIR/touch-layout-logcat.txt" || true
-cat "$OUT_DIR/touch-layout-logcat.txt"
-RECT="$(grep 'XRECT:' "$OUT_DIR/touch-layout-logcat.txt" | tail -1 | sed 's/.*XRECT://' | awk '{print $1}')"
-if [[ -z "$RECT" ]]; then echo "Native X rect was not logged" >&2; exit 6; fi
-IFS=',' read -r LEFT TOP RIGHT BOTTOM <<< "$RECT"
-TAP_X=$(( (LEFT + RIGHT) / 2 ))
-TAP_Y=$(( (TOP + BOTTOM) / 2 ))
-printf 'xrect=%s tap_x=%s tap_y=%s\n' "$RECT" "$TAP_X" "$TAP_Y" | tee "$OUT_DIR/tap.txt"
-adb shell input touchscreen tap "$TAP_X" "$TAP_Y"
-sleep 2
-adb logcat -d REVA_JS:I REVA_TOUCH:I '*:S' > "$OUT_DIR/input-logcat.txt" || true
-cat "$OUT_DIR/input-logcat.txt"
-grep -q 'INPUT_QA_READY' "$OUT_DIR/input-logcat.txt"
-grep -q 'PRESS:X' "$OUT_DIR/input-logcat.txt"
-grep -q 'RELEASE:X' "$OUT_DIR/input-logcat.txt"
-grep -q 'KEYDOWN:X:' "$OUT_DIR/input-logcat.txt"
-grep -q 'KEYUP:X:' "$OUT_DIR/input-logcat.txt"
-adb exec-out screencap -p > "$OUT_DIR/input-after.png"
-
-'''
+          replacement="\n".join([
+            "# Ask the actual native overlay for X's absolute on-screen rectangle instead of",
+            "# guessing through screenshot/orientation math. This catches letterboxing/insets too.",
+            "adb logcat -d REVA_TOUCH:I '*:S' > \"$OUT_DIR/touch-layout-logcat.txt\" || true",
+            "cat \"$OUT_DIR/touch-layout-logcat.txt\"",
+            "RECT=\"$(grep 'XRECT:' \"$OUT_DIR/touch-layout-logcat.txt\" | tail -1 | sed 's/.*XRECT://' | awk '{print $1}')\"",
+            "if [[ -z \"$RECT\" ]]; then echo \"Native X rect was not logged\" >&2; exit 6; fi",
+            "IFS=',' read -r LEFT TOP RIGHT BOTTOM <<< \"$RECT\"",
+            "TAP_X=$(( (LEFT + RIGHT) / 2 ))",
+            "TAP_Y=$(( (TOP + BOTTOM) / 2 ))",
+            "printf 'xrect=%s tap_x=%s tap_y=%s\\n' \"$RECT\" \"$TAP_X\" \"$TAP_Y\" | tee \"$OUT_DIR/tap.txt\"",
+            "adb shell input touchscreen tap \"$TAP_X\" \"$TAP_Y\"",
+            "sleep 2",
+            "adb logcat -d REVA_JS:I REVA_TOUCH:I '*:S' > \"$OUT_DIR/input-logcat.txt\" || true",
+            "cat \"$OUT_DIR/input-logcat.txt\"",
+            "grep -q 'INPUT_QA_READY' \"$OUT_DIR/input-logcat.txt\"",
+            "grep -q 'PRESS:X' \"$OUT_DIR/input-logcat.txt\"",
+            "grep -q 'RELEASE:X' \"$OUT_DIR/input-logcat.txt\"",
+            "grep -q 'KEYDOWN:X:' \"$OUT_DIR/input-logcat.txt\"",
+            "grep -q 'KEYUP:X:' \"$OUT_DIR/input-logcat.txt\"",
+            "adb exec-out screencap -p > \"$OUT_DIR/input-after.png\"",
+            "",
+          ]) + "\n"
           s=s[:start]+replacement+s[end:]
           p.write_text(s)
           PY
