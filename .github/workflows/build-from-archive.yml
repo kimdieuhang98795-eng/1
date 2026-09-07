@@ -18,7 +18,7 @@ jobs:
       - name: Checkout source bootstrap and patches
         uses: actions/checkout@v4
 
-      - name: Reassemble baseline and apply v1.2 + v1.3 patches
+      - name: Reassemble baseline and apply v1.2 + v1.3 source transforms
         run: |
           set -euo pipefail
           cat archive/part00 archive/part01 archive/part02 archive/part03 archive/part04 archive/part05 archive/part06 archive/part07 archive/part08 > /tmp/reva.zip.b64
@@ -30,7 +30,7 @@ jobs:
           cd work/reva_android_wrapper_v1_1
           cat "$GITHUB_WORKSPACE"/v1.2/mainpatch.part* > /tmp/v12-main.patch
           patch -p0 --fuzz=0 < /tmp/v12-main.patch
-          patch -p0 --fuzz=0 < "$GITHUB_WORKSPACE/v1.3/main.patch"
+          python3 "$GITHUB_WORKSPACE/v1.3/apply_v13.py" app/src/main/java/com/ajiu/reva/MainActivity.java
           python3 - <<'PY'
           from pathlib import Path
           p=Path('app/build.gradle')
