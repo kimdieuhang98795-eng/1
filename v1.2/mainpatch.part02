@@ -1,0 +1,78 @@
+-            addCircle("←",64,650,48); addCircle("↓",158,654,43); addCircle("→",252,650,48);
+-            // core combat
+-            addCircle("X",1228,650,45); addCircle("C",1130,558,39); addCircle("Z",1130,650,39); addCircle("V",1040,608,36);
+-            // utility
+-            addRect("SPACE",68,14,136,55); addRect("SHIFT",143,14,203,55);
+-            addCircle("1",225,35,20); addCircle("2",270,35,20); addCircle("3",315,35,20);
+-            // skill strip
+-            float start=884;
+-            for(int i=0;i<4;i++) addCircle(skillGroups[skillGroup][i], start+i*72,58,31);
+-            B g=addRect("技能 "+(skillGroup+1)+"/3",1170,24,1260,92); g.special=true;
++            releaseAll();
++            buttons.clear();
++            // DNF Mobile-inspired thumb hierarchy: large attack, jump/basic skills nearby,
++            // six skills in an arc, and a compact second skill page instead of a keyboard strip.
++            addCircle("X","攻",MODE_HOLD,0,1190,610,61);
++            addCircle("C","跳",MODE_PULSE,1,1088,658,44);
++            addCircle("Z","挑",MODE_PULSE,2,1093,562,42);
++            addCircle("V","抓",MODE_PULSE,3,997,630,39);
++
++            float[][] pos={{1005,512,36},{1080,477,35},{1160,466,35},{929,548,34},{932,465,34},{1001,420,34}};
++            String[] g=skillGroups[skillGroup];
++            for(int i=0;i<g.length;i++) addCircle(g[i],g[i],MODE_PULSE,4+i,(float)pos[i][0],(float)pos[i][1],(float)pos[i][2]);
++            addCircle("PAGE",(skillGroup+1)+"/2",MODE_PAGE,8,1218,386,29);
++
++            addCircle("1","1",MODE_PULSE,9,525,671,27);
++            addCircle("2","2",MODE_PULSE,9,592,671,27);
++            addCircle("3","3",MODE_PULSE,9,659,671,27);
++            addPill("SPACE","空格",MODE_HOLD,7,710,647,786,696);
++            addPill("SHIFT","Shift",MODE_HOLD,7,797,647,873,696);
+             invalidate();
++            B x=findByLabel("X"), a=findByLabel("A");
++            post(() -> {
++                int[] loc=new int[2]; getLocationOnScreen(loc);
++                if(x!=null) android.util.Log.i("REVA_TOUCH","XRECT:"+(loc[0]+Math.round(x.r.left))+","+(loc[1]+Math.round(x.r.top))+","+(loc[0]+Math.round(x.r.right))+","+(loc[1]+Math.round(x.r.bottom))+" VIEW:"+getWidth()+"x"+getHeight());
++                if(a!=null) android.util.Log.i("REVA_TOUCH","ARECT:"+(loc[0]+Math.round(a.r.left))+","+(loc[1]+Math.round(a.r.top))+","+(loc[0]+Math.round(a.r.right))+","+(loc[1]+Math.round(a.r.bottom)));
++                android.util.Log.i("REVA_TOUCH","JOY:"+(loc[0]+Math.round(joyX))+","+(loc[1]+Math.round(joyY))+","+Math.round(joyR));
++            });
+         }
+ 
+-        B addCircle(String l,float cx,float cy,float r){ return addRect(l,cx-r,cy-r,cx+r,cy+r); }
+-        B addRect(String l,float lft,float top,float rgt,float bot){ B b=new B(l);b.r.set(px(lft),py(top),px(rgt),py(bot));buttons.add(b);return b; }
++        B addCircle(String l,String cap,int mode,int tone,float cx,float cy,float r){ return addButton(l,cap,mode,tone,cx-r,cy-r,cx+r,cy+r); }
++        B addPill(String l,String cap,int mode,int tone,float lft,float top,float rgt,float bot){ return addButton(l,cap,mode,tone,lft,top,rgt,bot); }
++        B addButton(String l,String cap,int mode,int tone,float lft,float top,float rgt,float bot){
++            B b=new B(l,cap,mode,tone); b.r.set(px(lft),py(top),px(rgt),py(bot)); buttons.add(b); return b;
++        }
++        B findByLabel(String label){ for(B b:buttons) if(label.equals(b.label)) return b; return null; }
+         float px(float x){return ox+x*sc;} float py(float y){return oy+y*sc;}
+ 
++        int baseColor(B b){
++            if(b.tone==0) return 0xC84C3916; // attack: warm DNF-like gold/brown
++            if(b.tone==1) return 0xC8273342;
++            if(b.tone==2) return 0xC83A2630;
++            if(b.tone==3) return 0xC82C2A44;
++            if(b.tone==7) return 0xA8191C22;
++            if(b.tone==8) return 0xB31B1C22;
++            if(b.tone==9) return 0xB3262520;
++            int[] tones={0xC8322734,0xC8243142,0xC83A3021,0xC82B3B32,0xC83B2530,0xC8273540};
++            return tones[Math.abs(b.tone-4)%tones.length];
++        }
++
+         @Override protected void onDraw(Canvas c) {
+             super.onDraw(c);
+-            for(B b:buttons) {
+-                boolean circle=Math.abs(b.r.width()-b.r.height())<3*sc && !b.special;
+-                fill.setColor(b.active?0xAAE8E8E8:0x66202020);
+-                if(circle){c.drawOval(b.r,fill);c.drawOval(b.r,stroke);} else {c.drawRoundRect(b.r,12*sc,12*sc,fill);c.drawRoundRect(b.r,12*sc,12*sc,stroke);}
+-                text.setColor(b.active?Color.BLACK:Color.WHITE);
+-                text.setTextSize((b.label.length()>3?11:20)*sc);
+-                Paint.FontMetrics fm=text.getFontMetrics(); float y=b.r.centerY()-(fm.ascent+fm.descent)/2f;
+-                c.drawText(b.label,b.r.centerX(),y,text);
++            drawJoystick(c);
++            for(B b:buttons) drawButton(c,b);
++        }
++
++        void drawJoystick(Canvas c){
++            fill.setColor(0x5512171E); c.drawCircle(joyX,joyY,joyR,fill);
++            stroke.setStrokeWidth(2.2f*sc); stroke.setColor(0x88D9C99A); c.drawCircle(joyX,joyY,joyR,stroke);
