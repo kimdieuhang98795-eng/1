@@ -1,0 +1,95 @@
++        String local = imported.exists() ? "本地 SWF / Ruffle（用户本体）" : (hasBundledGame() ? "内置离线本体 / Ruffle（推荐）" : "本地 SWF / Ruffle（未找到本体）");
+         String[] a = {
+             "4399 H5 Final（在线备用）",
+             local,
+-            "智能获取本体（4399 → 韩国 Final → 官方 Final.zip）",
++            "修复 / 更换本体（联网：4399 → Final 保存源 → 官方包）",
+             "只获取 4399《勇闯地下城3.0》SWF",
+             "只获取韩国 Final 原版 SWF",
+             "从官方 Final.zip 提取 SWF",
+@@ -667,10 +744,14 @@
+                 ensureInternalPlayer();
+                 web.loadUrl(LOCAL_ORIGIN + "player.html");
+             } catch(Exception e) { toast("本地播放器启动失败："+e.getMessage()); }
++        } else if(hasBundledGame()) {
++            try {
++                ensureInternalPlayer();
++                web.loadUrl(LOCAL_ORIGIN + "player.html");
++            } catch(Exception e) { toast("离线本体启动失败："+e.getMessage()); }
+         } else {
+-            // Also supports developers packaging game.swf directly in assets before building.
+             web.loadUrl(LOCAL_ORIGIN + "player.html");
+-            toast("尚未导入 SWF；可从左上角菜单导入 SWF / FINAL.exe / Final.zip");
++            toast("没有找到可用本体；可从左上角菜单修复或导入。");
+         }
+     }
+ 
+@@ -686,8 +767,11 @@
+             msg=String.format(Locale.US,
+                 "game.swf\n实际大小：%.2f MB\n头：%s\nSWF 版本：%d\n声明解压大小：%.2f MB\nSHA-256：%s\n\n%s\n本地核心：原 SWF + Ruffle",
+                 swf.length()/1048576.0,i.signature,i.version,i.declaredLength/1048576.0,h,src);
++        } else if(hasBundledGame()) {
++            long n=bundledGameLength();
++            msg=String.format(Locale.US,"APK 已内置离线 game.swf\n大小：%.2f MB\n\n默认启动不需要联网。联网获取只保留为修复 / 更换本体功能。\n运行链：APK assets → reva.local → Ruffle", n>0?n/1048576.0:0.0);
+         } else {
+-            msg="尚未导入 game.swf。\n\n推荐使用“智能获取本体”：依次尝试 4399 游戏 234798、韩国 Final 单 SWF、reva.kr 官方 Final.zip；仍失败时可手动导入 SWF / FINAL.exe / Final.zip。";
++            msg="没有找到 game.swf。\n\n可使用“修复 / 更换本体”自动获取，或手动导入 SWF / FINAL.exe / Final.zip。";
+         }
+         new AlertDialog.Builder(this).setTitle("本体信息 / 校验").setMessage(msg).setPositiveButton("知道了",null).setOnDismissListener(d->hideSystem()).show();
+     }
+@@ -707,92 +791,227 @@
+     }
+ 
+     class TouchControlsView extends View {
++        static final int MODE_HOLD = 1;
++        static final int MODE_PULSE = 2;
++        static final int MODE_PAGE = 3;
++
+         class B {
+-            String label; int code; RectF r = new RectF(); boolean active; boolean special;
+-            B(String l){ label=l; code=keys.containsKey(l)?keys.get(l):0; }
++            String label, caption;
++            RectF r = new RectF();
++            boolean active;
++            int mode;
++            int tone;
++            B(String l,String cap,int m,int t){ label=l;caption=cap;mode=m;tone=t; }
+         }
+-        final Paint fill = new Paint(1), stroke = new Paint(1), text = new Paint(1);
++
++        final Paint fill = new Paint(1), stroke = new Paint(1), text = new Paint(1), icon = new Paint(1);
+         final List<B> buttons = new ArrayList<>();
+         final SparseArray<B> pointerMap = new SparseArray<>();
+         float sc=1f, ox=0f, oy=0f;
++        final float joyDesignX=154f, joyDesignY=565f, joyDesignR=105f;
++        float joyX,joyY,joyR,knobX,knobY;
++        int joystickPid=-1;
++        boolean moveLeft,moveRight,moveUp,moveDown;
+ 
+         TouchControlsView(Context c) {
+             super(c);
+             setFocusable(false);
+             setClickable(true);
+-            fill.setColor(0x66202020);
+-            stroke.setColor(0xCCFFFFFF); stroke.setStyle(Paint.Style.STROKE); stroke.setStrokeWidth(2f);
+-            text.setColor(Color.WHITE); text.setTextAlign(Paint.Align.CENTER); text.setTypeface(Typeface.DEFAULT_BOLD);
++            setHapticFeedbackEnabled(true);
++            stroke.setStyle(Paint.Style.STROKE);
++            text.setTextAlign(Paint.Align.CENTER);
++            text.setTypeface(Typeface.DEFAULT_BOLD);
++            icon.setStrokeCap(Paint.Cap.ROUND);
++            setLayerType(View.LAYER_TYPE_HARDWARE,null);
+         }
+ 
+         @Override protected void onSizeChanged(int w,int h,int ow,int oh) {
+-            sc=Math.min(w/1280f,h/720f); ox=(w-1280f*sc)/2f; oy=(h-720f*sc)/2f; rebuild();
++            sc=Math.min(w/1280f,h/720f);
++            ox=(w-1280f*sc)/2f; oy=(h-720f*sc)/2f;
++            joyX=px(joyDesignX); joyY=py(joyDesignY); joyR=joyDesignR*sc;
++            knobX=joyX; knobY=joyY;
++            rebuild();
+         }
+ 
+         void rebuild() {
+-            releaseAll(); buttons.clear();
+-            // movement
