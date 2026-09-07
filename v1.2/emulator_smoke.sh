@@ -15,7 +15,7 @@ adb install -r "$APK" | tee "$OUT_DIR/install.txt"
 adb logcat -c
 adb shell am force-stop "$PKG" || true
 
-# 1) Prove the bundled Ruffle JS/WASM can load an actual tiny SWF in Android WebView.
+# 1) Prove bundled Ruffle JS/WASM can load an actual tiny SWF in Android WebView.
 adb shell am start -W -n "$ACTIVITY" --ez qa_ruffle true | tee "$OUT_DIR/am-ruffle.txt"
 for i in $(seq 1 25); do
   sleep 1
@@ -53,7 +53,7 @@ read A_X A_Y < <(center_of_rect "$ARECT")
 IFS=',' read -r J_X J_Y J_R <<< "$JOY"
 printf 'x=%s,%s a=%s,%s joy=%s,%s r=%s\n' "$X_X" "$X_Y" "$A_X" "$A_Y" "$J_X" "$J_Y" "$J_R" | tee "$OUT_DIR/touch-points.txt"
 
-# X is a hold input. One physical tap must yield exactly one down/up pair.
+# X hold: one physical tap == exactly one down/up pair.
 adb logcat -c
 adb shell input touchscreen tap "$X_X" "$X_Y"
 sleep 1
@@ -66,7 +66,7 @@ grep -q 'KEYUP:X:' "$OUT_DIR/x-input-logcat.txt"
 [[ "$(grep -c 'KEYDOWN:X:' "$OUT_DIR/x-input-logcat.txt")" -eq 1 ]]
 [[ "$(grep -c 'KEYUP:X:' "$OUT_DIR/x-input-logcat.txt")" -eq 1 ]]
 
-# A is a pulse skill. This is the Cross-Slash-style regression: one touch == one cast pulse.
+# A pulse: Cross-Slash-style regression, one touch == one cast pulse.
 adb logcat -c
 adb shell input touchscreen tap "$A_X" "$A_Y"
 sleep 1
@@ -78,7 +78,7 @@ grep -q 'KEYUP:A:' "$OUT_DIR/a-input-logcat.txt"
 [[ "$(grep -c 'KEYDOWN:A:' "$OUT_DIR/a-input-logcat.txt")" -eq 1 ]]
 [[ "$(grep -c 'KEYUP:A:' "$OUT_DIR/a-input-logcat.txt")" -eq 1 ]]
 
-# Joystick right must always finish with an ArrowRight key-up (ghost-walk regression).
+# Joystick right must always finish with ArrowRight key-up (ghost-walk regression).
 END_X=$(( J_X + J_R * 2 / 3 ))
 adb logcat -c
 adb shell input touchscreen swipe "$J_X" "$J_Y" "$END_X" "$J_Y" 500
@@ -91,29 +91,32 @@ grep -q 'KEYUP:ARROWRIGHT:' "$OUT_DIR/joy-input-logcat.txt"
 [[ "$(grep -c 'KEYUP:ARROWRIGHT:' "$OUT_DIR/joy-input-logcat.txt")" -eq 1 ]]
 adb exec-out screencap -p > "$OUT_DIR/input-after.png"
 
-# 3) Normal offline launch with bundled game, then lifecycle background/resume.
+# 3) Real bundled Final SWF: wait until player.load(game.swf) resolves, not merely process survival.
 adb logcat -c
 adb shell am force-stop "$PKG"
 adb shell am start -W -n "$ACTIVITY" | tee "$OUT_DIR/am-normal.txt"
-sleep 10
-PID="$(adb shell pidof "$PKG" | tr -d '\r' | awk '{print $1}')"
-[[ -n "$PID" ]]
+for i in $(seq 1 60); do
+  sleep 1
+  PID="$(adb shell pidof "$PKG" | tr -d '\r' | awk '{print $1}')"
+  [[ -n "$PID" ]] || { echo 'App died during real Final load' >&2; exit 4; }
+  adb logcat --pid="$PID" -d > "$OUT_DIR/logcat-app.txt" || true
+  if grep -q 'REVA_GAME_READY' "$OUT_DIR/logcat-app.txt"; then break; fi
+  if grep -E -q 'FATAL EXCEPTION|Process: com\.ajiu\.reva.*has died|ANR in com\.ajiu\.reva' "$OUT_DIR/logcat-app.txt"; then
+    tail -200 "$OUT_DIR/logcat-app.txt" >&2; exit 4
+  fi
+done
+grep -q 'REVA_GAME_READY' "$OUT_DIR/logcat-app.txt"
 adb exec-out screencap -p > "$OUT_DIR/normal-launch.png"
-adb logcat --pid="$PID" -d > "$OUT_DIR/logcat-app.txt" || true
-if grep -E -q 'FATAL EXCEPTION|Process: com\.ajiu\.reva.*has died|ANR in com\.ajiu\.reva' "$OUT_DIR/logcat-app.txt"; then
-  tail -200 "$OUT_DIR/logcat-app.txt" >&2; exit 4
-fi
-# Normal launch should select the virtual local player when game.swf is bundled.
-grep -q 'https://reva.local/player.html' "$OUT_DIR/am-normal.txt" || true
 
+# 4) Background/resume after the real game has loaded.
 adb shell input keyevent KEYCODE_HOME
 sleep 1
 adb shell am start -W -n "$ACTIVITY" > "$OUT_DIR/am-resume.txt"
-sleep 2
+sleep 3
 PID2="$(adb shell pidof "$PKG" | tr -d '\r' | awk '{print $1}')"
 [[ -n "$PID2" ]]
 adb exec-out screencap -p > "$OUT_DIR/resume.png"
 adb logcat --pid="$PID2" -d > "$OUT_DIR/logcat-resume.txt" || true
 if grep -E -q 'FATAL EXCEPTION|ANR in com\.ajiu\.reva' "$OUT_DIR/logcat-resume.txt"; then exit 7; fi
 
-echo "PASS emulator smoke: Ruffle QA; X exactly once; A pulse exactly once; joystick right releases; offline normal launch survives background/resume; pid=$PID2"
+echo "PASS emulator smoke: Ruffle QA; X once; A pulse once; joystick releases; bundled Final reached REVA_GAME_READY; background/resume survived; pid=$PID2"
