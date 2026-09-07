@@ -1,0 +1,126 @@
+--- app/src/main/java/com/ajiu/reva/MainActivity.java
++++ app/src/main/java/com/ajiu/reva/MainActivity.java
+@@ -36,13 +36,17 @@
+     TouchControlsView controls;
+     TextView floatingMenu;
+     int skillGroup = 0;
+-    final String[][] skillGroups = {{"A","S","D","F"},{"G","H","Q","W"},{"E","R","T","Y"}};
++    final String[][] skillGroups = {{"A","S","D","F","G","H"},{"Q","W","E","R","T","Y"}};
+     final Map<String,Integer> keys = new HashMap<>();
+     final Map<Integer,Long> keyDownTimes = new HashMap<>();
++    final Map<Integer,Long> lastPulseTimes = new HashMap<>();
++    final Map<Integer,Runnable> pulseReleaseTasks = new HashMap<>();
++    Handler inputHandler;
+ 
+     @Override public void onCreate(Bundle b) {
+         super.onCreate(b);
+         hideSystem();
++        inputHandler = new Handler(Looper.getMainLooper());
+         mapKeys();
+         build();
+         if(getIntent()!=null && getIntent().getBooleanExtra("qa_input", false)) {
+@@ -52,7 +56,7 @@
+         } else {
+             recoverLocalSwfIfNeeded();
+             File local = new File(getFilesDir(), "game.swf");
+-            if(local.exists() && looksLikeSwf(local)) loadLocal(); else loadOnline();
++            if((local.exists() && looksLikeSwf(local)) || hasBundledGame()) loadLocal(); else loadOnline();
+         }
+     }
+ 
+@@ -71,6 +75,7 @@
+     void mapKeys() {
+         keys.put("←", KeyEvent.KEYCODE_DPAD_LEFT);
+         keys.put("→", KeyEvent.KEYCODE_DPAD_RIGHT);
++        keys.put("↑", KeyEvent.KEYCODE_DPAD_UP);
+         keys.put("↓", KeyEvent.KEYCODE_DPAD_DOWN);
+         for(char c='A'; c<='Z'; c++) keys.put(String.valueOf(c), KeyEvent.keyCodeFromString("KEYCODE_"+c));
+         keys.put("1", KeyEvent.KEYCODE_1);
+@@ -184,6 +189,11 @@
+     void send(String k, boolean down) {
+         Integer code = keys.get(k);
+         if(code == null) return;
++        dispatchKeyCode(code, down);
++    }
++
++    void dispatchKeyCode(int code, boolean down) {
++        if(web == null) return;
+         web.requestFocus();
+         long now = SystemClock.uptimeMillis();
+         long downTime;
+@@ -199,15 +209,82 @@
+         KeyEvent ev = new KeyEvent(downTime, now, down ? KeyEvent.ACTION_DOWN : KeyEvent.ACTION_UP, code, 0);
+         ev.setSource(InputDevice.SOURCE_KEYBOARD);
+         web.dispatchKeyEvent(ev);
++        android.util.Log.i("REVA_INPUT", (down ? "DOWN:" : "UP:") + code);
++    }
++
++    void pulse(String k) { pulse(k, 72L); }
++
++    void pulse(String k, long holdMs) {
++        Integer code = keys.get(k);
++        if(code == null || inputHandler == null) return;
++        long now = SystemClock.uptimeMillis();
++        Long last = lastPulseTimes.get(code);
++        // One physical touch must never become two skill activations because of jitter/re-entry.
++        if(last != null && now - last < 110L) return;
++        lastPulseTimes.put(code, now);
++        Runnable old = pulseReleaseTasks.remove(code);
++        if(old != null) inputHandler.removeCallbacks(old);
++        if(keyDownTimes.containsKey(code)) dispatchKeyCode(code, false);
++        dispatchKeyCode(code, true);
++        Runnable release = () -> {
++            dispatchKeyCode(code, false);
++            pulseReleaseTasks.remove(code);
++        };
++        pulseReleaseTasks.put(code, release);
++        inputHandler.postDelayed(release, Math.max(45L, holdMs));
++    }
++
++    void hardResetInputs() {
++        if(controls != null) controls.releaseAll();
++        if(inputHandler != null) {
++            for(Runnable r : new ArrayList<>(pulseReleaseTasks.values())) inputHandler.removeCallbacks(r);
++        }
++        pulseReleaseTasks.clear();
++        for(Integer code : new ArrayList<>(keyDownTimes.keySet())) dispatchKeyCode(code, false);
++        keyDownTimes.clear();
++    }
++
++    boolean hasBundledGame() {
++        try(InputStream in = getAssets().open("game.swf")) {
++            byte[] h = new byte[3];
++            return in.read(h) == 3 && isSwfSig(h);
++        } catch(Exception e) { return false; }
++    }
++
++    long bundledGameLength() {
++        try(android.content.res.AssetFileDescriptor afd = getAssets().openFd("game.swf")) { return afd.getLength(); }
++        catch(Exception e) { return -1L; }
++    }
++
++    @Override protected void onPause() {
++        hardResetInputs();
++        if(web != null) web.onPause();
++        super.onPause();
++    }
++
++    @Override protected void onResume() {
++        super.onResume();
++        hideSystem();
++        if(web != null) { web.onResume(); web.requestFocus(); }
++    }
++
++    @Override protected void onStop() {
++        hardResetInputs();
++        super.onStop();
++    }
++
++    @Override public void onWindowFocusChanged(boolean hasFocus) {
++        super.onWindowFocusChanged(hasFocus);
++        if(!hasFocus) hardResetInputs(); else hideSystem();
+     }
+ 
+     void showMenu() {
+         File imported = new File(getFilesDir(), "game.swf");
+-        String local = imported.exists() ? "本地 SWF / Ruffle（已导入）" : "本地 SWF / Ruffle（未导入）";
