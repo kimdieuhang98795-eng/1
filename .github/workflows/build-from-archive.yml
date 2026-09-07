@@ -42,6 +42,64 @@ jobs:
           test -f "$GITHUB_WORKSPACE/work/reva_android_wrapper_v1_1/app/build.gradle"
           test -f "$GITHUB_WORKSPACE/work/reva_android_wrapper_v1_1/app/src/main/java/com/ajiu/reva/MainActivity.java"
 
+      - name: Instrument native touch QA with exact on-screen X bounds
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('work/reva_android_wrapper_v1_1')
+          p=root/'app/src/main/java/com/ajiu/reva/MainActivity.java'
+          s=p.read_text()
+          old='addCircle("X",1228,650,45); addCircle("C",1130,558,39); addCircle("Z",1130,650,39); addCircle("V",1040,608,36);'
+          new='''B qaX = addCircle("X",1228,650,45); addCircle("C",1130,558,39); addCircle("Z",1130,650,39); addCircle("V",1040,608,36);\n            post(() -> { int[] loc=new int[2]; getLocationOnScreen(loc); android.util.Log.i("REVA_TOUCH", "XRECT:"+(loc[0]+Math.round(qaX.r.left))+","+(loc[1]+Math.round(qaX.r.top))+","+(loc[0]+Math.round(qaX.r.right))+","+(loc[1]+Math.round(qaX.r.bottom))+" VIEW:"+getWidth()+"x"+getHeight()+" LOC:"+loc[0]+","+loc[1]); });'''
+          if old not in s: raise SystemExit('X button layout needle missing')
+          s=s.replace(old,new,1)
+          old2='''        @Override public boolean onTouchEvent(MotionEvent e) {\n            int a=e.getActionMasked(), idx=e.getActionIndex();'''
+          new2='''        @Override public boolean onTouchEvent(MotionEvent e) {\n            int a=e.getActionMasked(), idx=e.getActionIndex();\n            android.util.Log.i("REVA_TOUCH", "EVENT:"+a+":"+Math.round(e.getX(idx))+","+Math.round(e.getY(idx)));'''
+          if old2 not in s: raise SystemExit('touch event needle missing')
+          s=s.replace(old2,new2,1)
+          old3='''            pointerMap.put(pid,b); if(!b.active){b.active=true;send(b.label,true);performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);invalidate();}'''
+          new3='''            pointerMap.put(pid,b); if(!b.active){b.active=true;android.util.Log.i("REVA_TOUCH","PRESS:"+b.label);send(b.label,true);performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);invalidate();}'''
+          if old3 not in s: raise SystemExit('press needle missing')
+          s=s.replace(old3,new3,1)
+          old4='''            if(!still && b.active){b.active=false;send(b.label,false);invalidate();}'''
+          new4='''            if(!still && b.active){b.active=false;android.util.Log.i("REVA_TOUCH","RELEASE:"+b.label);send(b.label,false);invalidate();}'''
+          if old4 not in s: raise SystemExit('release needle missing')
+          s=s.replace(old4,new4,1)
+          p.write_text(s)
+
+          p=root/'tools/emulator_smoke.sh'
+          s=p.read_text()
+          start=s.index('# Read the actual rotated screenshot size')
+          end=s.index('# Then launch the normal app path')
+          replacement=r'''# Ask the actual native overlay for X's absolute on-screen rectangle instead of
+# guessing through screenshot/orientation math. This catches letterboxing/insets too.
+adb logcat -d REVA_TOUCH:I '*:S' > "$OUT_DIR/touch-layout-logcat.txt" || true
+cat "$OUT_DIR/touch-layout-logcat.txt"
+RECT="$(grep 'XRECT:' "$OUT_DIR/touch-layout-logcat.txt" | tail -1 | sed 's/.*XRECT://' | awk '{print $1}')"
+if [[ -z "$RECT" ]]; then echo "Native X rect was not logged" >&2; exit 6; fi
+IFS=',' read -r LEFT TOP RIGHT BOTTOM <<< "$RECT"
+TAP_X=$(( (LEFT + RIGHT) / 2 ))
+TAP_Y=$(( (TOP + BOTTOM) / 2 ))
+printf 'xrect=%s tap_x=%s tap_y=%s\n' "$RECT" "$TAP_X" "$TAP_Y" | tee "$OUT_DIR/tap.txt"
+adb shell input touchscreen tap "$TAP_X" "$TAP_Y"
+sleep 2
+adb logcat -d REVA_JS:I REVA_TOUCH:I '*:S' > "$OUT_DIR/input-logcat.txt" || true
+cat "$OUT_DIR/input-logcat.txt"
+grep -q 'INPUT_QA_READY' "$OUT_DIR/input-logcat.txt"
+grep -q 'PRESS:X' "$OUT_DIR/input-logcat.txt"
+grep -q 'RELEASE:X' "$OUT_DIR/input-logcat.txt"
+grep -q 'KEYDOWN:X:' "$OUT_DIR/input-logcat.txt"
+grep -q 'KEYUP:X:' "$OUT_DIR/input-logcat.txt"
+adb exec-out screencap -p > "$OUT_DIR/input-after.png"
+
+'''
+          s=s[:start]+replacement+s[end:]
+          p.write_text(s)
+          PY
+          grep -n 'XRECT\|PRESS:' work/reva_android_wrapper_v1_1/app/src/main/java/com/ajiu/reva/MainActivity.java
+          grep -n 'touchscreen tap\|Native X rect' work/reva_android_wrapper_v1_1/tools/emulator_smoke.sh
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
