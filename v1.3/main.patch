@@ -1,0 +1,377 @@
+--- app/src/main/java/com/ajiu/reva/MainActivity.java	2026-09-07 22:52:16.000000000 +0000
++++ app/src/main/java/com/ajiu/reva/MainActivity.java	2026-09-07 23:30:18.124027786 +0000
+@@ -41,7 +41,10 @@
+     final Map<Integer,Long> keyDownTimes = new HashMap<>();
+     final Map<Integer,Long> lastPulseTimes = new HashMap<>();
+     final Map<Integer,Runnable> pulseReleaseTasks = new HashMap<>();
++    final Map<Integer,Integer> keyRepeatCounts = new HashMap<>();
+     Handler inputHandler;
++    boolean localPlayback = false;
++    long lastBlockedNavToast = 0L;
+ 
+     @Override public void onCreate(Bundle b) {
+         super.onCreate(b);
+@@ -50,9 +53,11 @@
+         mapKeys();
+         build();
+         if(getIntent()!=null && getIntent().getBooleanExtra("qa_input", false)) {
+-            web.loadUrl(LOCAL_ORIGIN + "qa_input.html");
++            localPlayback=true; web.loadUrl(LOCAL_ORIGIN + "qa_input.html");
+         } else if(getIntent()!=null && getIntent().getBooleanExtra("qa_ruffle", false)) {
+-            web.loadUrl(LOCAL_ORIGIN + "qa_ruffle.html");
++            localPlayback=true; web.loadUrl(LOCAL_ORIGIN + "qa_ruffle.html");
++        } else if(getIntent()!=null && getIntent().getBooleanExtra("qa_nav", false)) {
++            localPlayback=true; web.loadUrl(LOCAL_ORIGIN + "qa_nav.html");
+         } else {
+             recoverLocalSwfIfNeeded();
+             File local = new File(getFilesDir(), "game.swf");
+@@ -101,13 +106,21 @@
+         s.setAllowFileAccessFromFileURLs(true);
+         s.setAllowUniversalAccessFromFileURLs(true);
+         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
++        s.setSupportMultipleWindows(false);
++        s.setJavaScriptCanOpenWindowsAutomatically(false);
+         s.setUserAgentString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36");
+         web.setWebChromeClient(new WebChromeClient() {
+             @Override public boolean onConsoleMessage(ConsoleMessage cm) {
+                 android.util.Log.i("REVA_JS", cm.message());
+                 return true;
+             }
++            @Override public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, android.os.Message resultMsg) {
++                android.util.Log.i("REVA_NAV", "BLOCK_WINDOW");
++                blockedExternalNavigation("popup");
++                return false;
++            }
+         });
+         web.setWebViewClient(new WebViewClient() {
+             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+@@ -117,6 +130,27 @@
+             @Override public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
+                 return interceptLocal(Uri.parse(url));
+             }
++            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
++                Uri u=request==null?null:request.getUrl();
++                if(shouldBlockTopNavigation(u)) { blockedExternalNavigation(u==null?"null":u.toString()); return true; }
++                return false;
++            }
++            @SuppressWarnings("deprecation")
++            @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
++                Uri u=url==null?null:Uri.parse(url);
++                if(shouldBlockTopNavigation(u)) { blockedExternalNavigation(url); return true; }
++                return false;
++            }
++            @Override public void onPageStarted(WebView v, String url, Bitmap favicon) {
++                Uri u=url==null?null:Uri.parse(url);
++                if(shouldBlockTopNavigation(u)) {
++                    android.util.Log.w("REVA_NAV", "ESCAPED_NAV:"+url);
++                    v.stopLoading();
++                    v.post(() -> { if(localPlayback) v.loadUrl(LOCAL_ORIGIN+"player.html"); });
++                    return;
++                }
++                super.onPageStarted(v,url,favicon);
++            }
+             @Override public void onPageFinished(WebView v, String url) {
+                 v.requestFocus();
+                 if(url.contains("4399.com")) {
+@@ -149,6 +183,26 @@
+         root.addView(floatingMenu,p);
+     }
+ 
++    boolean shouldBlockTopNavigation(Uri uri) {
++        if(!localPlayback || uri==null) return false;
++        String scheme=uri.getScheme()==null?"":uri.getScheme().toLowerCase(Locale.US);
++        if("about".equals(scheme) || "data".equals(scheme) || "blob".equals(scheme)) return false;
++        if("https".equals(scheme) && "reva.local".equalsIgnoreCase(uri.getHost())) return false;
++        return "http".equals(scheme) || "https".equals(scheme) || "intent".equals(scheme) || "market".equals(scheme);
++    }
++
++    void blockedExternalNavigation(String url) {
++        android.util.Log.w("REVA_NAV", "BLOCK_NAV:"+url);
++        long now=SystemClock.uptimeMillis();
++        if(now-lastBlockedNavToast>2500L) {
++            lastBlockedNavToast=now;
++            runOnUiThread(() -> Toast.makeText(this,"已拦截原版外链，游戏继续运行",Toast.LENGTH_SHORT).show());
++        }
++        focusGamePlayer();
++    }
++
+     WebResourceResponse interceptLocal(Uri uri) {
+         if(uri == null || !"reva.local".equals(uri.getHost())) return null;
+         String path = uri.getPath(); if(path == null) path = "/";
+@@ -159,6 +213,9 @@
+             if(path.equals("/qa_ruffle.html")) {
+                 return response("text/html", "UTF-8", getAssets().open("qa_ruffle.html"));
+             }
++            if(path.equals("/qa_nav.html")) {
++                return response("text/html", "UTF-8", getAssets().open("qa_nav.html"));
++            }
+             if(path.equals("/qa_test.swf")) {
+                 return response("application/x-shockwave-flash", null, getAssets().open("qa_test.swf"));
+             }
+@@ -188,9 +245,16 @@
+         dispatchKeyCode(code, down);
+     }
+ 
++    void focusGamePlayer() {
++        if(web==null) return;
++        web.requestFocus();
++        if(localPlayback) web.evaluateJavascript("(function(){try{var p=document.querySelector('ruffle-player');if(p){p.tabIndex=0;p.focus();}var c=document.querySelector('ruffle-player canvas,canvas');if(c){c.tabIndex=0;c.focus();}}catch(e){}})()", null);
++    }
++
+     void dispatchKeyCode(int code, boolean down) {
+         if(web == null) return;
+-        web.requestFocus();
++        focusGamePlayer();
+         long now = SystemClock.uptimeMillis();
+         long downTime;
+         if(down) {
+@@ -198,9 +262,11 @@
+                 return;
+             }
+             downTime = now;
+             keyDownTimes.put(code, downTime);
++            keyRepeatCounts.put(code,0);
+         } else {
+             Long saved = keyDownTimes.remove(code);
++            keyRepeatCounts.remove(code);
+             if(saved == null) return;
+             downTime = saved;
+         }
+@@ -209,13 +275,28 @@
+         android.util.Log.i("REVA_INPUT", (down ? "DOWN:" : "UP:") + code);
+     }
+ 
+-    void pulse(String k) { pulse(k, 72L); }
++    void repeatKeyCode(int code) {
++        if(web==null) return;
++        Long downTime=keyDownTimes.get(code);
++        if(downTime==null) return;
++        focusGamePlayer();
++        int n=keyRepeatCounts.getOrDefault(code,0)+1;
++        keyRepeatCounts.put(code,n);
++        long now=SystemClock.uptimeMillis();
++        KeyEvent ev=new KeyEvent(downTime,now,KeyEvent.ACTION_DOWN,code,n);
++        ev.setSource(InputDevice.SOURCE_KEYBOARD);
++        web.dispatchKeyEvent(ev);
++        android.util.Log.i("REVA_INPUT","REPEAT:"+code+":"+n);
++    }
++
++    void pulse(String k) { pulse(k, 86L); }
+ 
+     void pulse(String k, long holdMs) {
+         Integer code = keys.get(k);
+         if(code == null || inputHandler == null) return;
+         long now = SystemClock.uptimeMillis();
+         Long last = lastPulseTimes.get(code);
+         // One physical touch must never become two skill activations because of jitter/re-entry.
+-        if(last != null && now - last < 110L) return;
++        if(last != null && now - last < 38L) return;
+         lastPulseTimes.put(code, now);
+         Runnable old = pulseReleaseTasks.remove(code);
+         if(old != null) inputHandler.removeCallbacks(old);
+@@ -229,6 +310,7 @@
+         Runnable release = () -> {
+             dispatchKeyCode(code, false);
+             pulseReleaseTasks.remove(code);
++            if(controls!=null) controls.reassertMovement();
+         };
+         pulseReleaseTasks.put(code, release);
+         inputHandler.postDelayed(release, Math.max(45L, holdMs));
+@@ -243,6 +325,7 @@
+         for(Integer code : new ArrayList<>(keyDownTimes.keySet())) dispatchKeyCode(code, false);
+         keyDownTimes.clear();
++        keyRepeatCounts.clear();
+     }
+ 
+     boolean hasBundledGame() {
+@@ -739,6 +822,7 @@
+     }
+ 
+     void loadLocal() {
++        localPlayback=true;
+         File swf = new File(getFilesDir(), "game.swf");
+         if(swf.exists() && looksLikeSwf(swf)) {
+             try {
+@@ -755,7 +839,7 @@
+         }
+     }
+ 
+-    void loadOnline() { web.loadUrl(ONLINE); }
++    void loadOnline() { localPlayback=false; hardResetInputs(); web.loadUrl(ONLINE); }
+ 
+     void showLocalInfo() {
+         File swf = new File(getFilesDir(), "game.swf");
+@@ -791,15 +875,19 @@
+         static final int MODE_HOLD = 1;
+         static final int MODE_PULSE = 2;
+         static final int MODE_PAGE = 3;
++        static final int MODE_REPEAT = 4;
+ 
+         class B {
+             String label, caption;
+             RectF r = new RectF();
+             boolean active;
++            boolean circle;
+             int mode;
+             int tone;
+             B(String l,String cap,int m,int t){ label=l;caption=cap;mode=m;tone=t; }
+@@ -812,6 +900,9 @@
+         float joyX,joyY,joyR,knobX,knobY;
+         int joystickPid=-1;
+         boolean moveLeft,moveRight,moveUp,moveDown;
++        Runnable movementRepeatTask;
++        Runnable attackRepeatTask;
++        B attackButton;
+ 
+         TouchControlsView(Context c) {
+             super(c);
+@@ -837,13 +928,13 @@
+             buttons.clear();
+             // DNF Mobile-inspired thumb hierarchy: large attack, jump/basic skills nearby,
+             // six skills in an arc, and a compact second skill page instead of a keyboard strip.
+-            addCircle("X","攻",MODE_HOLD,0,1190,610,61);
+-            addCircle("C","跳",MODE_PULSE,1,1088,658,44);
+-            addCircle("Z","挑",MODE_PULSE,2,1093,562,42);
+-            addCircle("V","抓",MODE_PULSE,3,997,630,39);
++            addCircle("X","攻",MODE_REPEAT,0,1205,610,60);
++            addCircle("C","跳",MODE_PULSE,1,1080,675,39);
++            addCircle("Z","挑",MODE_PULSE,2,1075,575,39);
++            addCircle("V","抓",MODE_PULSE,3,977,646,37);
+ 
+-            float[][] pos={{1005,512,36},{1080,477,35},{1160,466,35},{929,548,34},{932,465,34},{1001,420,34}};
++            float[][] pos={{986,510,34},{1062,478,34},{1144,470,34},{908,548,33},{914,468,33},{982,420,33}};
+             String[] g=skillGroups[skillGroup];
+             for(int i=0;i<g.length;i++) addCircle(g[i],g[i],MODE_PULSE,4+i,(float)pos[i][0],(float)pos[i][1],(float)pos[i][2]);
+             addCircle("PAGE",(skillGroup+1)+"/2",MODE_PAGE,8,1218,386,29);
+@@ -864,9 +955,9 @@
+             });
+         }
+ 
+-        B addCircle(String l,String cap,int mode,int tone,float cx,float cy,float r){ return addButton(l,cap,mode,tone,cx-r,cy-r,cx+r,cy+r); }
+-        B addPill(String l,String cap,int mode,int tone,float lft,float top,float rgt,float bot){ return addButton(l,cap,mode,tone,lft,top,rgt,bot); }
++        B addCircle(String l,String cap,int mode,int tone,float cx,float cy,float r){ B b=addButton(l,cap,mode,tone,cx-r,cy-r,cx+r,cy+r); b.circle=true; return b; }
++        B addPill(String l,String cap,int mode,int tone,float lft,float top,float rgt,float bot){ B b=addButton(l,cap,mode,tone,lft,top,rgt,bot); b.circle=false; return b; }
+         B addButton(String l,String cap,int mode,int tone,float lft,float top,float rgt,float bot){
+             B b=new B(l,cap,mode,tone); b.r.set(px(lft),py(top),px(rgt),py(bot)); buttons.add(b); return b;
+         }
+@@ -890,7 +981,7 @@
+         }
+ 
+         void drawButton(Canvas c,B b){
+-            boolean circle=Math.abs(b.r.width()-b.r.height())<3*sc;
++            boolean circle=b.circle;
+             fill.setColor(b.active?0xE6D6C07E:baseColor(b));
+             stroke.setStrokeWidth((b.active?3.3f:2.0f)*sc);
+             stroke.setColor(b.active?0xFFFFE4A0:0xBBD8C895);
+@@ -916,11 +1007,24 @@
+             c.drawLine(cx+r*0.2f,cy+r*0.85f,cx+r*0.85f,cy+r*0.2f,icon);
+         }
+ 
++        boolean containsButton(B b,float x,float y){
++            float slop=(b.tone>=7?5f:2f)*sc;
++            if(b.circle){
++                float rx=b.r.width()/2f+slop, ry=b.r.height()/2f+slop;
++                float dx=(x-b.r.centerX())/rx, dy=(y-b.r.centerY())/ry;
++                return dx*dx+dy*dy<=1f;
++            }
++            return x>=b.r.left-slop&&x<=b.r.right+slop&&y>=b.r.top-slop&&y<=b.r.bottom+slop;
++        }
+         B hitButton(float x,float y){
+-            float slop=9f*sc;
++            // Large attack button wins only inside its real circle; nearby skills no longer steal its corner taps.
++            B xBtn=findByLabel("X");
++            if(xBtn!=null && containsButton(xBtn,x,y)) return xBtn;
+             for(int i=buttons.size()-1;i>=0;i--){
+                 B b=buttons.get(i);
+-                if(x>=b.r.left-slop&&x<=b.r.right+slop&&y>=b.r.top-slop&&y<=b.r.bottom+slop)return b;
++                if(b==xBtn) continue;
++                if(containsButton(b,x,y)) return b;
+             }
+             return null;
+         }
+@@ -928,7 +1032,7 @@
+ 
+         void pressPointer(int pid,float x,float y){
+             if(joystickPid<0 && hitJoystick(x,y)) {
+-                joystickPid=pid; updateJoystick(x,y); performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); invalidate(); return;
++                joystickPid=pid; updateJoystick(x,y); ensureMovementRepeater(); performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); invalidate(); return;
+             }
+             B b=hitButton(x,y); if(b==null)return;
+             pointerMap.put(pid,b);
+             if(b.mode==MODE_PAGE){ skillGroup=(skillGroup+1)%skillGroups.length; performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); rebuild(); return; }
++            if(b.mode==MODE_REPEAT){
++                if(!b.active){ b.active=true; startAttackRepeat(b); performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); invalidate(); }
++                android.util.Log.i("REVA_TOUCH","ATTACK_START:pid="+pid);
++                return;
++            }
+             if(b.mode==MODE_PULSE){
+                 if(!b.active){ b.active=true; pulse(b.label); performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); invalidate();
+                     postDelayed(()->{b.active=false;invalidate();},95L); }
+@@ -947,10 +1055,55 @@
+             B b=pointerMap.get(pid); if(b==null)return;
+             pointerMap.remove(pid);
+             if(b.mode==MODE_HOLD && b.active){ b.active=false; send(b.label,false); invalidate(); android.util.Log.i("REVA_TOUCH","RELEASE:"+b.label+":pid="+pid); }
++            if(b.mode==MODE_REPEAT && b.active){ stopAttackRepeat(b); android.util.Log.i("REVA_TOUCH","ATTACK_STOP:pid="+pid); }
+             // Pulse buttons intentionally do nothing on finger-up: key-up is generated by the fixed pulse timer.
+         }
+ 
++        void startAttackRepeat(B b){
++            attackButton=b;
++            if(attackRepeatTask!=null) inputHandler.removeCallbacks(attackRepeatTask);
++            attackRepeatTask=new Runnable(){ public void run(){
++                if(attackButton==null || !attackButton.active) return;
++                pulse("X",58L);
++                inputHandler.postDelayed(this,132L);
++            }};
++            attackRepeatTask.run();
++        }
++
++        void stopAttackRepeat(B b){
++            b.active=false;
++            attackButton=null;
++            if(attackRepeatTask!=null) inputHandler.removeCallbacks(attackRepeatTask);
++            attackRepeatTask=null;
++            Integer xCode=keys.get("X");
++            if(xCode!=null && keyDownTimes.containsKey(xCode)) dispatchKeyCode(xCode,false);
++            invalidate();
++        }
++
++        void ensureMovementRepeater(){
++            if(movementRepeatTask!=null) return;
++            movementRepeatTask=new Runnable(){ public void run(){
++                if(joystickPid<0){ movementRepeatTask=null; return; }
++                reassertMovement();
++                inputHandler.postDelayed(this,92L);
++            }};
++            inputHandler.postDelayed(movementRepeatTask,120L);
++        }
++
++        void stopMovementRepeater(){
++            if(movementRepeatTask!=null) inputHandler.removeCallbacks(movementRepeatTask);
++            movementRepeatTask=null;
++        }
++
++        void reassertMovement(){
++            if(moveLeft) repeatKeyCode(keys.get("←"));
++            if(moveRight) repeatKeyCode(keys.get("→"));
++            if(moveUp) repeatKeyCode(keys.get("↑"));
++            if(moveDown) repeatKeyCode(keys.get("↓"));
++        }
++
+         void updateJoystick(float x,float y){
+             float dx=x-joyX,dy=y-joyY,dist=(float)Math.hypot(dx,dy);
+             float max=joyR*0.63f;
+@@ -982,11 +1135,12 @@
+         }
+ 
+         void releaseJoystick(){
+-            joystickPid=-1; knobX=joyX;knobY=joyY; setMoveState(false,false,false,false); invalidate();
++            joystickPid=-1; stopMovementRepeater(); knobX=joyX;knobY=joyY; setMoveState(false,false,false,false); invalidate();
+         }
+ 
+         void releaseAll(){
+             releaseJoystick();
++            if(attackButton!=null) stopAttackRepeat(attackButton);
+             for(B b:buttons) if(b.mode==MODE_HOLD && b.active){ b.active=false;send(b.label,false); }
+             pointerMap.clear(); invalidate();
+         }
