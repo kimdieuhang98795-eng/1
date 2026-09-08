@@ -51,6 +51,7 @@ jobs:
           cp "$GITHUB_WORKSPACE/v1.5/qa_input.html" app/src/main/assets/qa_input.html
           cp "$GITHUB_WORKSPACE/v1.5/check_project.py" tools/check_project.py
           cp "$GITHUB_WORKSPACE/v1.5/emulator_smoke.sh" tools/emulator_smoke.sh
+          python3 "$GITHUB_WORKSPACE/v1.5/fix_emulator_smoke.py" tools/emulator_smoke.sh
           chmod +x tools/check_project.py tools/emulator_smoke.sh
           cd ..
           mv reva_android_wrapper_v1_1 reva_android_wrapper_v1_5
