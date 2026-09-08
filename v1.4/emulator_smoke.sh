@@ -6,6 +6,23 @@ mkdir -p "$OUT_DIR"; test -f "$APK"
 adb wait-for-device; adb shell getprop sys.boot_completed | grep -q 1
 adb install -r "$APK" | tee "$OUT_DIR/install.txt"
 
+# Hosted API-35 images occasionally boot Pixel Launcher into an ANR dialog that sits above
+# every app and absorbs adb touches. It is unrelated to Reva; suppress/dismiss it before QA.
+adb shell settings put global hide_error_dialogs 1 || true
+adb shell am force-stop com.google.android.apps.nexuslauncher || true
+adb shell am force-stop com.android.launcher3 || true
+sleep 1
+
+assert_reva_foreground(){
+  adb shell dumpsys window windows 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' > "$OUT_DIR/focus.txt" || true
+  if ! grep -q "$PKG" "$OUT_DIR/focus.txt"; then
+    adb exec-out screencap -p > "$OUT_DIR/unexpected-system-dialog.png" || true
+    echo 'Foreground is not Reva; possible system dialog:' >&2
+    cat "$OUT_DIR/focus.txt" >&2
+    return 1
+  fi
+}
+
 # 1) Ruffle itself.
 adb logcat -c; adb shell am force-stop "$PKG" || true
 adb shell am start -W -n "$ACTIVITY" --ez qa_ruffle true > "$OUT_DIR/am-ruffle.txt"
@@ -15,6 +32,7 @@ grep -q RUFFLE_QA_READY "$OUT_DIR/ruffle-logcat.txt"; ! grep -q RUFFLE_QA_FAIL "
 # 2) Original Naver external navigation remains blocked.
 adb logcat -c; adb shell am force-stop "$PKG" || true
 adb shell am start -W -n "$ACTIVITY" --ez qa_nav true > "$OUT_DIR/am-nav.txt"; sleep 3
+assert_reva_foreground
 adb logcat -d -s REVA_NAV:W REVA_JS:I > "$OUT_DIR/nav-logcat.txt" || true
 grep -q 'NAV_QA_READY' "$OUT_DIR/nav-logcat.txt"; grep -q 'BLOCK_NAV:http://blog.naver.com/mister1315' "$OUT_DIR/nav-logcat.txt"
 adb exec-out screencap -p > "$OUT_DIR/nav-blocked.png"
@@ -22,6 +40,8 @@ adb exec-out screencap -p > "$OUT_DIR/nav-blocked.png"
 # 3) Touch/key harness.
 adb logcat -c; adb shell am force-stop "$PKG" || true
 adb shell am start -W -n "$ACTIVITY" --ez qa_input true > "$OUT_DIR/am-input.txt"; sleep 3
+assert_reva_foreground
+adb exec-out screencap -p > "$OUT_DIR/input-ready.png"
 adb logcat -d -s REVA_TOUCH:I REVA_JS:I REVA_INPUT:I > "$OUT_DIR/layout-logcat.txt" || true
 get_field(){ grep "$1" "$OUT_DIR/layout-logcat.txt" | tail -1 | sed "s/.*$1//" | awk '{print $1}'; }
 XRECT="$(get_field 'XRECT:')"; ARECT="$(get_field 'ARECT:')"; JOY="$(get_field 'JOY:')"
