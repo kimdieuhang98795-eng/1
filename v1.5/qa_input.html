@@ -1,0 +1,17 @@
+<!doctype html><meta charset="utf-8"><title>Reva v1.5 input QA</title>
+<style>html,body{margin:0;background:#15181d;color:#eee;font:22px sans-serif}#s{padding:28px}b{color:#e6c875}</style>
+<div id="s"><b>REVA v1.5 DOM INPUT QA</b><br>waiting for direct DOM keyboard events…</div>
+<script>
+(function(){
+  const state={};
+  function out(type,e){
+    const code=e.code||'NO_CODE', key=e.key||'NO_KEY';
+    if(type==='DOWN') state[code]=true; else delete state[code];
+    console.log('DOM_'+type+':'+code+':'+key);
+    document.getElementById('s').innerHTML='<b>REVA v1.5 DOM INPUT QA</b><br>'+type+' '+code+' / '+key+'<br>held: '+Object.keys(state).join(', ');
+  }
+  window.addEventListener('keydown',e=>out('DOWN',e));
+  window.addEventListener('keyup',e=>out('UP',e));
+  console.log('DOM_INPUT_QA_READY');
+})();
+</script>
