@@ -41,11 +41,16 @@ assert 'send("↓"' not in ju and 'send("↑"' not in ju
 assert 'ny' not in ju
 assert 'moveUp=false; moveDown=false;' in ju
 
-# Pointer ownership: no MOVE-time reclamation, no ownership migration.
-for forbidden in ['recoverJoystickOnMove(','pointerExists(MotionEvent e,int pid)']:
+# Pointer ownership: one role at DOWN, no MOVE-time reclamation/migration.
+for forbidden in ['recoverJoystickOnMove(','pointerExists(MotionEvent e,int pid)','pointerMappedToButton(']:
     assert forbidden not in s, forbidden
-assert 'pointerRoles' in s and 'ROLE_JOYSTICK' in s and 'ROLE_BUTTON' in s
-assert 'assignPointerRole(' in s and 'releasePointerRole(' in s
+for k in ['pointerRoles','ROLE_JOYSTICK','ROLE_BUTTON','ROLE_GAME','assignPointerRole(','releasePointerRole(','moveOwnedPointers(']:
+    assert k in s,k
+assert 'Always true: this view is the single touch router' in s
+
+# Joystick start zone is forgiving at the rendered lower-left edge. Because role assignment is immutable,
+# widening DOWN-time capture cannot later steal a GAME pointer during MOVE.
+assert 'x>=px(0f) && x<=px(390f) && y>=py(340f) && y<=py(720f)' in s
 
 # v1.3 synthetic repeat architecture remains forbidden.
 for forbidden in ['MODE_REPEAT','startAttackRepeat(','stopAttackRepeat(','ensureMovementRepeater(','stopMovementRepeater(','reassertMovement(','repeatKeyCode(','inputHandler.postDelayed(this,132L)','inputHandler.postDelayed(this,92L)']:
@@ -54,6 +59,11 @@ for forbidden in ['MODE_REPEAT','startAttackRepeat(','stopAttackRepeat(','ensure
 # Input black box must log both logical and backend events so real-device ghosts can be diagnosed.
 for k in ['REVA_TRACE','traceInput(','TRACE_CAPACITY','LOGICAL:','BACKEND:']:
     assert k in s,k
+
+# Multi-touch pressure harness: joystick + held attack + direction change + skill tap, repeated.
+for k in ['qa_stress','runSyntheticStress(','qaInject(','STRESS_DONE','PASS_SEQUENCE_DONE']:
+    assert k in s,k
+assert 'new int[]{0,1}' in s and 'new int[]{0,2}' in s
 
 # QA page dynamically constructs DOM_DOWN / DOM_UP records.
 assert 'DOM_INPUT_QA_READY' in qa
@@ -65,9 +75,11 @@ for k in ['VERTICAL_NO_BACKSTEP','BACKSTEP_BUTTON','DOM_DOWN:KeyX','DOM_UP:KeyX'
 assert "versionCode 15" in app and "versionName '1.5'" in app
 assert "noCompress += ['swf', 'wasm']" in app
 print('PASS v1.5: stable pointer ownership; no MOVE-time reclamation')
+print('PASS v1.5: generous DOWN-time joystick capture with immutable ownership')
 print('PASS v1.5: game semantics corrected (horizontal walk; Down dedicated backstep)')
 print('PASS v1.5: direct DOM KeyboardEvent bridge for local Ruffle')
 print('PASS v1.5: neutral-on-touch floating joystick + hysteresis')
 print('PASS v1.5: input black-box trace for logical/backend events')
+print('PASS v1.5: 8-cycle synthetic multi-pointer stress harness present')
 print('PASS v1.5: unconditional direction/all-key release safeguards')
 print('PASS v1.5: no synthetic repeat architecture')
