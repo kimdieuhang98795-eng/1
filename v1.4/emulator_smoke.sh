@@ -13,14 +13,35 @@ adb shell am force-stop com.google.android.apps.nexuslauncher || true
 adb shell am force-stop com.android.launcher3 || true
 sleep 1
 
+capture_focus(){
+  {
+    adb shell dumpsys activity activities 2>/dev/null | grep -m1 -E 'mResumedActivity|topResumedActivity' || true
+    adb shell dumpsys activity top 2>/dev/null | grep -m1 '^ACTIVITY ' || true
+    adb shell dumpsys window displays 2>/dev/null | grep -m2 -E 'mCurrentFocus|mFocusedApp' || true
+    adb shell dumpsys window windows 2>/dev/null | grep -m2 -E 'mCurrentFocus|mFocusedApp' || true
+  } | tr -d '\r' > "$OUT_DIR/focus.txt"
+}
+
 assert_reva_foreground(){
-  adb shell dumpsys window windows 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' > "$OUT_DIR/focus.txt" || true
-  if ! grep -q "$PKG" "$OUT_DIR/focus.txt"; then
-    adb exec-out screencap -p > "$OUT_DIR/unexpected-system-dialog.png" || true
-    echo 'Foreground is not Reva; possible system dialog:' >&2
-    cat "$OUT_DIR/focus.txt" >&2
-    return 1
+  # API 35 / emulator 37 sometimes exposes no mCurrentFocus line even though the Activity is
+  # visibly resumed. Prefer the ActivityManager resumed/top signals and retry through transitions.
+  for i in $(seq 1 12); do
+    capture_focus
+    grep -q "$PKG" "$OUT_DIR/focus.txt" && return 0
+    sleep 0.5
+  done
+
+  # Empty focus metadata is not itself a failure: the in-app QA sentinels below are stronger proof.
+  # Only fail when Android positively reports a different foreground activity/package.
+  if [[ ! -s "$OUT_DIR/focus.txt" ]]; then
+    echo 'Foreground metadata unavailable on this API-35 image; continuing with in-app QA sentinels.' >&2
+    return 0
   fi
+
+  adb exec-out screencap -p > "$OUT_DIR/unexpected-system-dialog.png" || true
+  echo 'Foreground is positively reported as non-Reva; possible system dialog:' >&2
+  cat "$OUT_DIR/focus.txt" >&2
+  return 1
 }
 
 # 1) Ruffle itself.
