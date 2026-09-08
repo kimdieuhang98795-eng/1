@@ -32,6 +32,7 @@ jobs:
           patch -p0 --fuzz=0 < /tmp/v12-main.patch
           python3 "$GITHUB_WORKSPACE/v1.3/apply_v13.py" app/src/main/java/com/ajiu/reva/MainActivity.java
           python3 "$GITHUB_WORKSPACE/v1.4/apply_v14.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 "$GITHUB_WORKSPACE/v1.4/finalize_v14.py" app/src/main/java/com/ajiu/reva/MainActivity.java
           python3 - <<'PY'
           from pathlib import Path
           p=Path('app/build.gradle')
