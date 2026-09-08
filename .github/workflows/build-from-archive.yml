@@ -9,6 +9,7 @@ on:
     branches: [ main ]
     paths:
       - '.github/workflows/build-from-archive.yml'
+      - 'v1.4/**'
 
 jobs:
   build:
