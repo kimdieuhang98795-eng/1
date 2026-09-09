@@ -7,6 +7,9 @@ smoke=(r/'tools/emulator_smoke.sh').read_text()
 qa=(r/'app/src/main/assets/qa_input.html').read_text()
 manifest=(r/'app/src/main/AndroidManifest.xml').read_text()
 html=(r/'app/src/main/assets/index.html').read_text()
+config_path=r/'app/src/main/java/com/ajiu/reva/ControlLayoutConfig.java'
+config=config_path.read_text() if config_path.exists() else ''
+modern_layout=bool(config)
 
 for f in [
  'app/src/main/AndroidManifest.xml','app/src/main/java/com/ajiu/reva/MainActivity.java',
@@ -32,8 +35,16 @@ assert "case KeyEvent.KEYCODE_DPAD_DOWN" in s and '"ArrowDown","ArrowDown"' in s
 assert 'Legacy online fallback only.' in s
 
 # Correct game semantics: joystick is horizontal-only; Down is dedicated backstep.
-for k in ['addCircle("↓","后",MODE_PULSE','BACKRECT:','JOY_CLAIM_NEUTRAL:','float engage=joyR*0.26f','float release=joyR*0.12f','setMoveState(l,r,false,false);']:
+for k in ['BACKRECT:','JOY_CLAIM_NEUTRAL:','float engage=joyR*0.26f','float release=joyR*0.12f','setMoveState(l,r,false,false);']:
     assert k in s,k
+if modern_layout:
+    # v1.8+ moved visual construction out of MainActivity. Verify the semantic
+    # action still exists in config rather than demanding the legacy addCircle call.
+    assert 'ButtonSpec.circle("↓", "后跳", PULSE' in config
+    for k in ['ControlLayoutConfig.modern()','LAYOUT:MODERN_V18']:
+        assert k in s,k
+else:
+    assert 'addCircle("↓","后",MODE_PULSE' in s
 assert 'Vertical arrows are not movement in this game' in s
 assert 'setMoveState(nx<-dead,nx>dead,ny<-dead,ny>dead)' not in s
 ju=s[s.index('        void updateJoystick(float x,float y){'):s.index('        void releaseJoystick(){')]
@@ -48,9 +59,19 @@ for k in ['pointerRoles','ROLE_JOYSTICK','ROLE_BUTTON','ROLE_GAME','assignPointe
     assert k in s,k
 assert 'Always true: this view is the single touch router' in s
 
-# Joystick start zone is forgiving at the rendered lower-left edge. Because role assignment is immutable,
-# widening DOWN-time capture cannot later steal a GAME pointer during MOVE.
-assert 'x>=px(0f) && x<=px(390f) && y>=py(340f) && y<=py(720f)' in s
+# Joystick start zone remains forgiving. In v1.8+ its geometry is data-driven;
+# before that it is intentionally hard-coded in MainActivity.
+if modern_layout:
+    for k in ['controlLayout.joystickZoneLeft','controlLayout.joystickZoneTop','controlLayout.joystickZoneRight','controlLayout.joystickZoneBottom']:
+        assert k in s,k
+    for k in ['0f, 340f, 390f, 720f','92f, 390f, 335f, 625f']:
+        assert k in config,k
+    for k in ['coreButtons','skillSlots','pageButton','itemButtons','utilityButtons','ButtonSpec.circle("X", "普攻"']:
+        assert k in config,k
+    assert 'addCircle("X","攻"' not in s
+    assert 'float[][] pos={{986,510,34}' not in s
+else:
+    assert 'x>=px(0f) && x<=px(390f) && y>=py(340f) && y<=py(720f)' in s
 
 # v1.3 synthetic repeat architecture remains forbidden.
 for forbidden in ['MODE_REPEAT','startAttackRepeat(','stopAttackRepeat(','ensureMovementRepeater(','stopMovementRepeater(','reassertMovement(','repeatKeyCode(','inputHandler.postDelayed(this,132L)','inputHandler.postDelayed(this,92L)']:
@@ -74,12 +95,12 @@ for k in ['VERTICAL_NO_BACKSTEP','BACKSTEP_BUTTON','DOM_DOWN:KeyX','DOM_UP:KeyX'
 
 assert "versionCode 15" in app and "versionName '1.5'" in app
 assert "noCompress += ['swf', 'wasm']" in app
-print('PASS v1.5: stable pointer ownership; no MOVE-time reclamation')
-print('PASS v1.5: generous DOWN-time joystick capture with immutable ownership')
-print('PASS v1.5: game semantics corrected (horizontal walk; Down dedicated backstep)')
-print('PASS v1.5: direct DOM KeyboardEvent bridge for local Ruffle')
-print('PASS v1.5: neutral-on-touch floating joystick + hysteresis')
-print('PASS v1.5: input black-box trace for logical/backend events')
-print('PASS v1.5: 8-cycle synthetic multi-pointer stress harness present')
-print('PASS v1.5: unconditional direction/all-key release safeguards')
-print('PASS v1.5: no synthetic repeat architecture')
+print('PASS v1.5+: stable pointer ownership; no MOVE-time reclamation')
+print('PASS v1.5+: game semantics corrected (horizontal walk; Down dedicated backstep)')
+print('PASS v1.5+: direct DOM KeyboardEvent bridge for local Ruffle')
+print('PASS v1.5+: neutral-on-touch floating joystick + hysteresis')
+print('PASS v1.5+: input black-box trace for logical/backend events')
+print('PASS v1.5+: 8-cycle synthetic multi-pointer stress harness present')
+print('PASS v1.5+: unconditional direction/all-key release safeguards')
+print('PASS v1.5+: no synthetic repeat architecture')
+print('PASS layout QA:', 'data-driven modern HUD' if modern_layout else 'legacy embedded HUD')
