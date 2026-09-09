@@ -33,6 +33,12 @@ jobs:
           python3 "$GITHUB_WORKSPACE/v1.5/apply_v15.py" app/src/main/java/com/ajiu/reva/MainActivity.java
           python3 "$GITHUB_WORKSPACE/v1.5/run_finalize_v15_fixed.py" app/src/main/java/com/ajiu/reva/MainActivity.java
           python3 "$GITHUB_WORKSPACE/v1.5/strengthen_v15.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle')
+          s=p.read_text().replace('versionCode 11','versionCode 16').replace("versionName '1.1'","versionName '1.6'")
+          p.write_text(s)
+          PY
           python3 "$GITHUB_WORKSPACE/v1.7/apply_v17.py" .
           cp app/src/main/java/com/ajiu/reva/MainActivity.java "$GITHUB_WORKSPACE/MainActivity-v17.java"
       - name: Upload exact final source
