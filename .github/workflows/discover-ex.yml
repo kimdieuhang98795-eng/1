@@ -1,0 +1,51 @@
+name: Discover Reva 3.0 EX source
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/discover-ex.yml'
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Inspect MHHF and 7k7k pages for SWF source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re, html, urllib.request
+          urls=[
+            'https://www.mhhf.com/game/play/4711?format=11',
+            'https://www.mhhf.com/game/detail/4711',
+            'https://www.7k7k.com/swf/207478.htm',
+          ]
+          headers={'User-Agent':'Mozilla/5.0'}
+          for u in urls:
+            print('\n===',u,'===')
+            req=urllib.request.Request(u,headers=headers)
+            try:
+              data=urllib.request.urlopen(req,timeout=20).read().decode('utf-8','ignore')
+            except Exception as e:
+              print('FETCH_FAIL',repr(e)); continue
+            print('LEN',len(data))
+            # Print direct asset/API candidates only, not the whole page.
+            vals=[]
+            for pat in [r'https?://[^\"\'<> ]+', r'[^\"\'<> ]+\.swf(?:\?[^\"\'<> ]*)?', r'[^\"\'<> ]+(?:api|game|flash)[^\"\'<> ]*']:
+              vals += re.findall(pat,data,re.I)
+            seen=set()
+            for v in vals:
+              v=html.unescape(v)
+              if v in seen: continue
+              seen.add(v)
+              if any(k in v.lower() for k in ['swf','4711','207478','gamev','game/play','game/detail','flash','api']):
+                print('CAND',v[:500])
+            # Print snippets around likely variables.
+            for key in ['swf','gameurl','game_url','flashvars','gamefile','game_file','source','4711','207478']:
+              pos=data.lower().find(key.lower())
+              if pos>=0:
+                print('SNIP',key, data[max(0,pos-250):pos+600].replace('\n',' ')[:900])
+          PY
