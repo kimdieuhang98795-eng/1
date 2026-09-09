@@ -1,0 +1,1 @@
+The discovery workflow is intentionally isolated from the stable v1.5 build so a bad EX source cannot replace the known-good Korean Final artifact.
