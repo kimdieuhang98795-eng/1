@@ -1,0 +1,1 @@
+Discovery should be read from Actions logs before any source URL is accepted.
