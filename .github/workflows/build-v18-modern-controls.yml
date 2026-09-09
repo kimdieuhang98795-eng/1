@@ -1,0 +1,207 @@
+name: Build Reva Android v1.8 Modern Controls APK
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/build-v18-modern-controls.yml'
+      - 'v1.2/**'
+      - 'v1.3/**'
+      - 'v1.4/**'
+      - 'v1.5/**'
+      - 'v1.6/**'
+      - 'v1.7/**'
+      - 'v1.8/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout source bootstrap and transforms
+        uses: actions/checkout@v4
+
+      - name: Reassemble baseline and apply v1.2 through v1.8
+        run: |
+          set -euo pipefail
+          cat archive/part00 archive/part01 archive/part02 archive/part03 archive/part04 archive/part05 archive/part06 archive/part07 archive/part08 > /tmp/reva.zip.b64
+          test "$(wc -c < /tmp/reva.zip.b64)" -eq 86132
+          base64 -d /tmp/reva.zip.b64 > /tmp/reva_v1_1.zip
+          echo '6ea5b7f9cd0d5a83e925de9199a17d4d8a969dad471e054ca681a9456747a3d2  /tmp/reva_v1_1.zip' | sha256sum -c -
+          rm -rf work && mkdir -p work
+          unzip -q /tmp/reva_v1_1.zip -d work
+          cd work/reva_android_wrapper_v1_1
+          cat "$GITHUB_WORKSPACE"/v1.2/mainpatch.part* > /tmp/v12-main.patch
+          patch -p0 --fuzz=0 < /tmp/v12-main.patch
+          python3 "$GITHUB_WORKSPACE/v1.3/apply_v13.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 "$GITHUB_WORKSPACE/v1.4/run_apply_v14_fixed.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 "$GITHUB_WORKSPACE/v1.4/finalize_v14.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 "$GITHUB_WORKSPACE/v1.5/apply_v15.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 "$GITHUB_WORKSPACE/v1.5/run_finalize_v15_fixed.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 "$GITHUB_WORKSPACE/v1.5/strengthen_v15.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle')
+          s=p.read_text().replace('versionCode 11','versionCode 16').replace("versionName '1.1'","versionName '1.6'")
+          p.write_text(s)
+          p=Path('app/src/main/assets/index.html')
+          s=p.read_text()
+          s=s.replace('优先使用 APK 内置 Ruffle；只有构建时未打包 Ruffle 才会尝试联网备用源。','Ruffle 与 3.0 EX 汉化本体均随 APK 内置；正常启动完全离线。')
+          s=s.replace('Ruffle 与 Final 本体均随 APK 内置；正常启动完全离线，联网仅用于可选修复 / 更换本体。','Ruffle 与 3.0 EX 汉化本体均随 APK 内置；正常启动完全离线。')
+          s=s.replace('从左上角菜单选择“智能获取本体”或“导入 / 替换原版 SWF”。','左上角菜单保留手动导入/修复功能；正常游玩无需下载其他本体。')
+          s=s.replace('window.__REVA_PLAYER_READY__=true;','window.__REVA_PLAYER_READY__=true; console.log(\'REVA_GAME_READY\');')
+          p.write_text(s)
+          p=Path('app/src/main/java/com/ajiu/reva/MainActivity.java')
+          s=p.read_text()
+          s=s.replace('修复 / 更换本体（联网：4399 → Final 保存源 → 官方包）','修复 / 更换本体（会切换为其他兼容本体）')
+          s=s.replace('APK 已内置离线 game.swf','APK 已内置 3.0 EX 汉化 game.swf')
+          p.write_text(s)
+          PY
+          cp "$GITHUB_WORKSPACE/v1.3/qa_nav.html" app/src/main/assets/qa_nav.html
+          cp "$GITHUB_WORKSPACE/v1.5/qa_input.html" app/src/main/assets/qa_input.html
+          cp "$GITHUB_WORKSPACE/v1.5/check_project.py" tools/check_project.py
+          cp "$GITHUB_WORKSPACE/v1.5/emulator_smoke.sh" tools/emulator_smoke.sh
+          python3 "$GITHUB_WORKSPACE/v1.5/fix_emulator_smoke.py" tools/emulator_smoke.sh
+          python3 "$GITHUB_WORKSPACE/v1.6/fix_ex_smoke.py" tools/emulator_smoke.sh
+          python3 "$GITHUB_WORKSPACE/v1.7/fix_smoke_v17.py" tools/emulator_smoke.sh
+          python3 "$GITHUB_WORKSPACE/v1.7/apply_v17.py" .
+          python3 "$GITHUB_WORKSPACE/v1.8/apply_v18.py" .
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tools/check_project.py')
+          s=p.read_text().replace('versionCode 15','versionCode 18').replace("versionName '1.5'","versionName '1.8'")
+          p.write_text(s)
+          PY
+          chmod +x tools/check_project.py tools/emulator_smoke.sh
+          cd ..
+          mv reva_android_wrapper_v1_1 reva_android_wrapper_v1_8
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4.0.1
+
+      - name: Install Android 35 SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Bundle pinned Ruffle self-hosted
+        working-directory: work/reva_android_wrapper_v1_8
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/assets/ruffle /tmp/ruffle_pkg
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/ruffle.zip "https://github.com/ruffle-rs/ruffle/releases/download/nightly-2026-09-05/ruffle-nightly-2026_09_05-web-selfhosted.zip"
+          unzip -q /tmp/ruffle.zip -d /tmp/ruffle_pkg
+          cp -a /tmp/ruffle_pkg/. app/src/main/assets/ruffle/
+          test -f app/src/main/assets/ruffle/ruffle.js
+          find app/src/main/assets/ruffle -maxdepth 1 -name '*.wasm' -print -quit | grep .
+
+      - name: Bundle pinned 3.0 EX SWF and external BGM resources
+        working-directory: work/reva_android_wrapper_v1_8
+        run: |
+          set -euo pipefail
+          rm -f app/src/main/assets/game.swf app/src/main/assets/game.swf.part
+          rm -rf app/src/main/assets/BGM
+          python3 "$GITHUB_WORKSPACE/v1.7/bundle_ex_assets.py" .
+          python3 tools/verify_swf.py app/src/main/assets/game.swf
+          test -s app/src/main/assets/BGM/BG.jpg
+          test -s app/src/main/assets/BGM/1602.mp3
+
+      - name: Run v1.8 architecture and inherited local QA
+        working-directory: work/reva_android_wrapper_v1_8
+        run: |
+          set -euo pipefail
+          bash qa/run_local_qa.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          app=Path('app/build.gradle').read_text()
+          main=Path('app/src/main/java/com/ajiu/reva/MainActivity.java').read_text()
+          config=Path('app/src/main/java/com/ajiu/reva/ControlLayoutConfig.java').read_text()
+          html=Path('app/src/main/assets/index.html').read_text()
+          assert "versionCode 18" in app and "versionName '1.8'" in app
+          for token in ['ROLE_JOYSTICK','ROLE_BUTTON','ROLE_GAME','logical','REVA_TRACE','REVA_ASSET','/BGM/','LAYOUT:MODERN_V18','ControlLayoutConfig.modern()']:
+              assert token in main, token
+          for token in ['coreButtons','skillSlots','pageButton','itemButtons','utilityButtons','joystickZoneLeft','ButtonSpec.circle("X", "普攻"']:
+              assert token in config, token
+          for forbidden in ['recoverJoystickOnMove','addCircle("X","攻"','float[][] pos={{986,510,34}','drawSkillMark(Canvas c,B b)']:
+              assert forbidden not in main, forbidden
+          assert main.count('void drawButton(Canvas c,B b)') == 1
+          assert main.count('B findByLabel(String label)') == 1
+          assert '3.0 EX' in html or '3.0 EX' in main
+          assert Path('app/src/main/assets/BGM/BG.jpg').stat().st_size > 1024
+          print('PASS v1.8 structure: data-driven HUD + inherited stable input router + offline EX')
+          PY
+
+      - name: Build debug APK
+        working-directory: work/reva_android_wrapper_v1_8
+        run: gradle --no-daemon assembleDebug
+
+      - name: Inspect APK contents and metadata
+        working-directory: work/reva_android_wrapper_v1_8
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -f "$APK"
+          sha256sum "$APK" | tee app-debug.apk.sha256
+          unzip -l "$APK" | tee apk-files.txt
+          grep -E 'assets/game.swf|assets/BGM/BG.jpg|assets/BGM/1602.mp3|assets/ruffle/ruffle.js|assets/ruffle/.*\.wasm|assets/qa_input.html|assets/qa_nav.html' apk-files.txt
+          [[ "$(grep -c 'assets/BGM/.*\.mp3' apk-files.txt)" -eq 13 ]]
+          grep -q 'assets/BGM/BG.jpg' apk-files.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee apk-badging.txt
+          grep -q "package: name='com.ajiu.reva'" apk-badging.txt
+          grep -q "versionCode='18'" apk-badging.txt
+          grep -q "versionName='1.8'" apk-badging.txt
+          grep -q "targetSdkVersion:'35'" apk-badging.txt
+
+      - name: Install render QA dependency
+        run: python3 -m pip install --quiet pillow
+
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Android 35 emulator modern-control EX render and input regression
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 3072M
+          heap-size: 512M
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            adb shell settings put secure immersive_mode_confirmations confirmed || true
+            bash work/reva_android_wrapper_v1_8/tools/emulator_smoke.sh work/reva_android_wrapper_v1_8/app/build/outputs/apk/debug/app-debug.apk work/reva_android_wrapper_v1_8/qa/emulator
+            adb logcat -d | grep 'LAYOUT:MODERN_V18' | tail -1 | tee work/reva_android_wrapper_v1_8/qa/emulator/layout-v18.log
+            test -s work/reva_android_wrapper_v1_8/qa/emulator/layout-v18.log
+
+      - name: Upload v1.8 APK and QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reva-android-v1.8-modern-controls
+          if-no-files-found: warn
+          path: |
+            work/reva_android_wrapper_v1_8/app/build/outputs/apk/debug/app-debug.apk
+            work/reva_android_wrapper_v1_8/app-debug.apk.sha256
+            work/reva_android_wrapper_v1_8/apk-badging.txt
+            work/reva_android_wrapper_v1_8/apk-files.txt
+            work/reva_android_wrapper_v1_8/bundled-game.txt
+            work/reva_android_wrapper_v1_8/app/src/main/java/com/ajiu/reva/ControlLayoutConfig.java
+            work/reva_android_wrapper_v1_8/qa/emulator/**
