@@ -1,0 +1,1 @@
+Discovery CI expected to identify source candidates from MHHF/7k7k HTML.
