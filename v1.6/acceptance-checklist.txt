@@ -1,0 +1,8 @@
+[ ] exact EX SWF source discovered
+[ ] candidate header validated
+[ ] candidate size/sha256 recorded
+[ ] Chinese UI verified
+[ ] Ruffle load verified
+[ ] v1.5 input core unchanged or targeted compatibility change documented
+[ ] Android 35 multitouch regression passed
+[ ] v1.6 APK artifact produced
