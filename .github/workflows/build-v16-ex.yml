@@ -66,14 +66,12 @@ jobs:
           cp "$GITHUB_WORKSPACE/v1.5/check_project.py" tools/check_project.py
           cp "$GITHUB_WORKSPACE/v1.5/emulator_smoke.sh" tools/emulator_smoke.sh
           python3 "$GITHUB_WORKSPACE/v1.5/fix_emulator_smoke.py" tools/emulator_smoke.sh
-          # Give the real EX build a few extra seconds to render its first visible frame after Ruffle load resolves.
+          python3 "$GITHUB_WORKSPACE/v1.6/fix_ex_smoke.py" tools/emulator_smoke.sh
+          # Adapt the inherited checker to the new wrapper version instead of suppressing it.
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('tools/emulator_smoke.sh')
-          s=p.read_text()
-          needle="grep -q 'REVA_GAME_READY' \"$OUT_DIR/logcat-app.txt\""
-          if needle in s:
-              s=s.replace(needle, needle+"\nsleep 5", 1)
+          p=Path('tools/check_project.py')
+          s=p.read_text().replace('versionCode 15','versionCode 16').replace("versionName '1.5'","versionName '1.6'")
           p.write_text(s)
           PY
           chmod +x tools/check_project.py tools/emulator_smoke.sh
@@ -137,15 +135,11 @@ jobs:
           PY
           python3 tools/verify_swf.py app/src/main/assets/game.swf
 
-      - name: Run full local QA
+      - name: Run full adapted local QA
         working-directory: work/reva_android_wrapper_v1_6
         run: |
-          # v1.5 checker expects its own version string, so run the behavioral/local suite first,
-          # then perform v1.6-specific structure assertions below.
-          bash qa/run_local_qa.sh || {
-            echo 'Base QA returned nonzero; checking whether failure is only v1.5 version expectation.'
-            python3 -m py_compile tools/check_project.py
-          }
+          set -euo pipefail
+          bash qa/run_local_qa.sh
           python3 - <<'PY'
           from pathlib import Path
           app=Path('app/build.gradle').read_text()
@@ -156,7 +150,7 @@ jobs:
               assert token in main, token
           assert 'recoverJoystickOnMove' not in main
           assert '3.0 EX' in html or '3.0 EX' in main
-          print('PASS v1.6 structure: v1.5 input core retained + EX labeling')
+          print('PASS v1.6 structure: full inherited QA + v1.5 input core + EX labeling')
           PY
 
       - name: Build debug APK
