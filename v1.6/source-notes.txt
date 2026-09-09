@@ -1,0 +1,6 @@
+Public reference checked 2026-09-09:
+- MHHF game id 4711: 雷巴的冒险 3.0 EX汉化版
+- Public page reports size 44,271,336 bytes and latest content update 2026-03-21.
+- Controls remain left/right movement, down=backstep, X attack, C jump, Z upper attack, V grab, skills A/S/D/F/G/H/Q/W/E/R/T/Y.
+
+Do not promote a candidate SWF to v1.6 until its identity, header, size, runtime compatibility and Chinese UI are verified.
