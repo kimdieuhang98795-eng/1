@@ -1,0 +1,137 @@
+name: Trace 3.0 EX Skill Underlay Assets
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/trace-skill-underlay-assets.yml'
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Download pinned SWF and FFDec
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          python3 - <<'PY'
+          import urllib.request,hashlib
+          u='https://www.mhhf.com/files/game/4711/lbmxex.swf'
+          q=urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0','Referer':'https://www.mhhf.com/'})
+          b=urllib.request.urlopen(q,timeout=120).read()
+          assert len(b)==17628685
+          assert hashlib.sha256(b).hexdigest()=='0c7904469438078919c705dc7d0da11a9e0595fce29decd68f84599b25d3f457'
+          open('/tmp/game.swf','wb').write(b)
+          PY
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/ffdec.zip 'https://github.com/jindrapetrik/jpexs-decompiler/releases/download/version26.2.1/ffdec_26.2.1.zip'
+          echo '0333b56998a55bd83f4e0deb678a811fcdc45607582b4f5dd438309c8c3ad5ce  /tmp/ffdec.zip' | sha256sum -c -
+          mkdir -p /tmp/ffdec && unzip -q /tmp/ffdec.zip -d /tmp/ffdec
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -dumpSWF /tmp/game.swf > /tmp/dump.txt 2>&1
+
+      - name: Classify structural sibling assets
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,json
+          # Non-handler children immediately surrounding transparent/basic skill
+          # placements in the four proven profession timelines.
+          ids={1394,1770,1772,1774,1822,1825,1831,1833,1840,1843,1849,2626,
+               4062,4081,4111,4112,4113,4114,4118,
+               4142,4144,4157,4160,4163,4168,4169,4173,4174,
+               4201,4202,4216,4219,4223,4229,4230,4231,
+               4237,4238,4267,4268,4279,4281,4285,4289,4290}
+          lines=Path('/tmp/dump.txt').read_text(errors='ignore').splitlines()
+          defs={}
+          rx=re.compile(r'\b(DefineSprite|DefineShape\d*|DefineMorphShape\d*|DefineButton\d*|DefineBits\w*) \(chid:\s*(\d+)')
+          for i,line in enumerate(lines):
+              m=rx.search(line)
+              if m and int(m.group(2)) in ids:
+                  defs[int(m.group(2))]={'type':m.group(1),'line':i+1,'text':line.strip()}
+          Path('report/asset-types.json').write_text(json.dumps(defs,indent=2,ensure_ascii=False))
+          with Path('report/asset-types.tsv').open('w') as f:
+              f.write('id\ttype\tline\n')
+              for sid in sorted(ids): f.write(f"{sid}\t{defs.get(sid,{}).get('type','MISSING')}\t{defs.get(sid,{}).get('line','')}\n")
+          for kind,prefix in [('sprite','DefineSprite'),('shape','DefineShape'),('morphshape','DefineMorphShape'),('button','DefineButton'),('image','DefineBits')]:
+              vals=[str(sid) for sid,x in defs.items() if x['type'].startswith(prefix)]
+              Path(f'/tmp/{kind}-ids.txt').write_text(','.join(sorted(vals,key=int)))
+          print('CLASSIFIED',len(defs),'OF',len(ids))
+          PY
+          cat report/asset-types.tsv
+
+      - name: Export sibling visual assets by tag type
+        run: |
+          set -euo pipefail
+          mkdir -p report/assets /tmp/assets
+          : > report/export-status.txt
+          export_kind(){
+            kind="$1"; idsfile="/tmp/${kind}-ids.txt"; ids="$(cat "$idsfile")"
+            [[ -z "$ids" ]] && { echo "$kind=SKIP" >> report/export-status.txt; return 0; }
+            out="/tmp/assets/$kind"; mkdir -p "$out"
+            set +e
+            java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -selectid "$ids" -format "$kind:png" -export "$kind" "$out" /tmp/game.swf > "report/${kind}-export.log" 2>&1
+            rc=$?
+            set -e
+            echo "$kind=$rc ids=$ids" >> report/export-status.txt
+          }
+          export_kind sprite
+          export_kind shape
+          export_kind morphshape
+          export_kind button
+          export_kind image
+          cp -a /tmp/assets/. report/assets/ || true
+          find report/assets -type f | sort > report/asset-files.txt
+          echo "ASSET_FILES=$(wc -l < report/asset-files.txt)" | tee -a report/export-status.txt
+
+      - name: Build structural sibling contact sheet
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image,ImageDraw,ImageFont
+          import re,math,json
+          root=Path('report/assets'); rows=[]
+          for p in sorted(root.rglob('*.png')):
+              try:
+                  im=Image.open(p).convert('RGBA'); w,h=im.size
+                  alpha=im.getchannel('A'); visible=sum(1 for v in alpha.getdata() if v>8)
+                  m=re.search(r'(\d+)',p.stem+' '+str(p.parent)); sid=int(m.group(1)) if m else -1
+                  rows.append((p,w,h,sid,visible,p.parent.name))
+              except Exception: pass
+          Path('report/visual-assets.json').write_text(json.dumps([
+              {'id':sid,'kind':kind,'w':w,'h':h,'visiblePixels':vis,'file':str(p.relative_to(root))}
+              for p,w,h,sid,vis,kind in rows],indent=2))
+          cell=170; cols=6; per=36; font=ImageFont.load_default(); out=Path('report'); out.mkdir(exist_ok=True)
+          for page,start in enumerate(range(0,len(rows),per),1):
+              part=rows[start:start+per]; rr=math.ceil(len(part)/cols)
+              sh=Image.new('RGB',(cols*cell,rr*cell),(28,28,28)); d=ImageDraw.Draw(sh)
+              for j,(p,w,h,sid,vis,kind) in enumerate(part):
+                  r=j//cols; c=j%cols; x0=c*cell; y0=r*cell
+                  im=Image.open(p).convert('RGBA'); im.thumbnail((130,120),Image.Resampling.LANCZOS)
+                  bg=Image.new('RGBA',(134,124),(235,235,235,255)); bg.alpha_composite(im,((134-im.width)//2,(124-im.height)//2))
+                  sh.paste(bg.convert('RGB'),(x0+18,y0+4))
+                  d.text((x0+4,y0+132),f'id {sid} {kind} {w}x{h}',fill='white',font=font)
+                  d.text((x0+4,y0+146),f'px {vis}',fill=(190,190,190),font=font)
+              sh.save(out/f'underlay-assets-{page:02d}.png')
+          print('VISUAL_ASSETS',len(rows))
+          if not rows: raise SystemExit('No sibling visuals exported')
+          PY
+
+      - name: Upload underlay trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reva-3.0ex-skill-underlay-assets
+          if-no-files-found: warn
+          path: report/**
