@@ -78,8 +78,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/sprites /tmp/buttons
-          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -select 'all:1' -export sprite:png /tmp/sprites /tmp/game.swf | tee skill-symbol-report/sprite-export.log
-          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -export button:png /tmp/buttons /tmp/game.swf | tee skill-symbol-report/button-export.log
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -select 'all:1' -format sprite:png -export sprite /tmp/sprites /tmp/game.swf | tee skill-symbol-report/sprite-export.log
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -format button:png -export button /tmp/buttons /tmp/game.swf | tee skill-symbol-report/button-export.log
           find /tmp/sprites -type f | sort > skill-symbol-report/sprite-files.txt
           find /tmp/buttons -type f | sort > skill-symbol-report/button-files.txt
           echo "SPRITE_FILES=$(wc -l < skill-symbol-report/sprite-files.txt)"
