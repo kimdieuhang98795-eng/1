@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import subprocess
 import sys
 
 p=Path(sys.argv[1] if len(sys.argv)>1 else 'tools/emulator_smoke.sh')
@@ -48,4 +49,14 @@ for token in ['PROFILERECT=','PROFILE_X','PROFILE_SWITCH PASS','PROFILE:Ranger:æ
 if 'LAYOUT:MODERN_V110' in s:
     raise SystemExit('v1.11 stale V110 marker in smoke')
 p.write_text(s)
-print('PASS fix_smoke_v111: robust profile selector tap + zero-keydown leak + V111 final marker')
+
+# The inherited v1.5 layout checker compares comma-spacing literally. v1.11
+# intentionally keeps the same geometry with compact formatting, so normalize
+# whitespace while retaining exact semantic/coordinate assertions.
+check=p.parent/'check_project.py'
+fix=Path(__file__).with_name('fix_check_v111.py')
+if not check.is_file() or not fix.is_file():
+    raise SystemExit('v1.11 QA normalization helper missing')
+subprocess.run([sys.executable,str(fix),str(check)],check=True)
+
+print('PASS fix_smoke_v111: robust profile selector tap + zero-keydown leak + V111 final marker + semantic layout QA')
