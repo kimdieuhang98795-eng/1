@@ -27,24 +27,47 @@ once('''[[ "$X_X" -ne "$BEX_X" || "$X_Y" -ne "$BEX_Y" ]]\n''','''[[ "$X_X" -ne "
 printf 'PROFILE_RECT center=%s,%s raw=%s\\n' "$PROFILE_X" "$PROFILE_Y" "$PROFILERECT" | tee -a "$OUT_DIR/parsed-rects.txt"
 ''')
 
-# Insert selector regression immediately before v1.10's final fresh-layout launch.
+# First selector regression: Spitfire -> Ranger. This is presentation state only
+# and must not leak a game keydown into Ruffle.
 marker='''# The parent workflow checks the final device log for LAYOUT:MODERN_V110.\n'''
 insert='''# PROFILE_SWITCH: presentation-only selector must not leak a game key event.
 adb logcat -c
 adb shell input touchscreen tap "$PROFILE_X" "$PROFILE_Y"; sleep 1
 logs "$OUT_DIR/profile-switch-logcat.txt"; cat "$OUT_DIR/profile-switch-logcat.txt"
-grep -q 'PROFILE:Ranger:漫游' "$OUT_DIR/profile-switch-logcat.txt"
-! grep -q 'REVA_DOMKEY.*DOWN:' "$OUT_DIR/profile-switch-logcat.txt"
+grep -q 'REVA_TOUCH: PROFILE:Ranger:漫游' "$OUT_DIR/profile-switch-logcat.txt"
+! grep -q 'REVA_DOMKEY: DOWN:' "$OUT_DIR/profile-switch-logcat.txt"
 echo 'PROFILE_SWITCH PASS' | tee -a "$OUT_DIR/profile-switch-logcat.txt"
 
 # The parent workflow checks the final device log for LAYOUT:MODERN_V111.
 '''
 once(marker,insert)
 
-# v1.11 advances the runtime marker everywhere in the final-layout smoke block.
+# v1.11 advances the runtime marker everywhere in the inherited final-layout block.
 s=s.replace('LAYOUT:MODERN_V110','LAYOUT:MODERN_V111')
 
-for token in ['PROFILERECT=','PROFILE_X','PROFILE_SWITCH PASS','PROFILE:Ranger:漫游','LAYOUT:MODERN_V111','PROFILE_RECT center=']:
+# The inherited smoke continues after its mid-suite "final layout" checkpoint and
+# clears logcat again for later tests. Add one authoritative post-suite relaunch.
+# The first selector tap persisted Ranger. After force-stop/start, one more tap must
+# therefore advance Ranger -> Berserker; falling back to Spitfire would produce
+# Ranger instead and fail this persistence check. This final tap also deliberately
+# leaves a fresh V111 layout marker in device logcat for the parent workflow.
+s += r'''
+
+# v1.11 authoritative post-suite profile persistence + final marker.
+adb logcat -c
+adb shell am force-stop "$PKG" || true
+adb shell am start -W -n "$ACTIVITY" --ez qa_input true > "$OUT_DIR/am-profile-persist.txt"
+sleep 2
+adb shell input touchscreen tap "$PROFILE_X" "$PROFILE_Y"; sleep 1
+logs "$OUT_DIR/profile-persist-logcat.txt"; cat "$OUT_DIR/profile-persist-logcat.txt"
+grep -q 'REVA_TOUCH: PROFILE:Berserker:狂战' "$OUT_DIR/profile-persist-logcat.txt"
+grep -q 'REVA_TOUCH: LAYOUT:MODERN_V111:' "$OUT_DIR/profile-persist-logcat.txt"
+! grep -q 'REVA_DOMKEY: DOWN:' "$OUT_DIR/profile-persist-logcat.txt"
+echo 'PROFILE_PERSIST PASS' | tee -a "$OUT_DIR/profile-persist-logcat.txt"
+'''
+
+for token in ['PROFILERECT=','PROFILE_X','PROFILE_SWITCH PASS','PROFILE:Ranger:漫游',
+              'PROFILE_PERSIST PASS','PROFILE:Berserker:狂战','LAYOUT:MODERN_V111','PROFILE_RECT center=']:
     if token not in s: raise SystemExit('v1.11 smoke insertion failed: '+token)
 if 'LAYOUT:MODERN_V110' in s:
     raise SystemExit('v1.11 stale V110 marker in smoke')
@@ -59,4 +82,4 @@ if not check.is_file() or not fix.is_file():
     raise SystemExit('v1.11 QA normalization helper missing')
 subprocess.run([sys.executable,str(fix),str(check)],check=True)
 
-print('PASS fix_smoke_v111: robust profile selector tap + zero-keydown leak + V111 final marker + semantic layout QA')
+print('PASS fix_smoke_v111: profile switch + restart persistence + zero-keydown leak + authoritative V111 marker + semantic layout QA')
