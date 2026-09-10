@@ -73,4 +73,4 @@ once(marker,insert)
 if 'EX_CTRL PASS' not in s or 'EX_B PASS' not in s or 'FINAL_LAYOUT PASS' not in s or "CTRLRECT=" not in s or 'REVA_TOUCH: $1' not in s:
     raise SystemExit('v1.10 EX smoke insertion failed')
 p.write_text(s)
-print('PASS fix_smoke_v110: exact layout fields + Ctrl/B regression + final layout evidence')
+print('PASS fix_smoke_v110: exact layout fields + Ctrl/B regression + final layout evidence; render QA is stdlib-only')
