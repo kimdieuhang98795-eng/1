@@ -1,0 +1,149 @@
+name: Extract 3.0 EX Skill Icon Candidates
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/extract-skill-icons.yml'
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Download pinned 3.0 EX SWF
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import urllib.request, hashlib
+          url='https://www.mhhf.com/files/game/4711/lbmxex.swf'
+          req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Referer':'https://www.mhhf.com/game/play/4711?format=11'})
+          with urllib.request.urlopen(req,timeout=120) as r:
+              b=r.read()
+          sha=hashlib.sha256(b).hexdigest()
+          assert len(b)==17628685, len(b)
+          assert sha=='0c7904469438078919c705dc7d0da11a9e0595fce29decd68f84599b25d3f457', sha
+          open('/tmp/game.swf','wb').write(b)
+          print('SWF',len(b),sha)
+          PY
+
+      - name: Download FFDec 26.2.1
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/ffdec.zip 'https://github.com/jindrapetrik/jpexs-decompiler/releases/download/version26.2.1/ffdec_26.2.1.zip'
+          echo '0333b56998a55bd83f4e0deb678a811fcdc45607582b4f5dd438309c8c3ad5ce  /tmp/ffdec.zip' | sha256sum -c -
+          mkdir -p /tmp/ffdec
+          unzip -q /tmp/ffdec.zip -d /tmp/ffdec
+          test -f /tmp/ffdec/ffdec.jar
+
+      - name: Export embedded images from SWF
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/export
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -export image /tmp/export /tmp/game.swf | tee /tmp/ffdec-export.log
+          find /tmp/export -type f | sort | tee /tmp/exported-files.txt
+          test "$(find /tmp/export -type f | wc -l)" -gt 20
+
+      - name: Build dimension report and candidate contact sheets
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pillow
+          mkdir -p skill-icon-report/candidates skill-icon-report/sheets
+          cp /tmp/ffdec-export.log skill-icon-report/
+          cp /tmp/exported-files.txt skill-icon-report/
+          python3 - <<'PY'
+          from PIL import Image, ImageOps, ImageDraw, ImageFont
+          from pathlib import Path
+          from collections import Counter
+          import shutil, math, json
+
+          root=Path('/tmp/export')
+          out=Path('skill-icon-report')
+          rows=[]
+          for p in sorted(root.rglob('*')):
+              if not p.is_file(): continue
+              try:
+                  with Image.open(p) as im:
+                      w,h=im.size
+                      mode=im.mode
+                  rows.append((p,w,h,mode,p.stat().st_size))
+              except Exception:
+                  pass
+
+          dims=Counter((w,h) for _,w,h,_,_ in rows)
+          with (out/'dimensions.txt').open('w') as f:
+              f.write(f'TOTAL_IMAGES={len(rows)}\n')
+              for (w,h),n in dims.most_common():
+                  f.write(f'{w}x{h}\t{n}\n')
+
+          # DNF-era skill icons are usually small, square-ish UI bitmaps. Keep a generous range.
+          candidates=[]
+          for p,w,h,mode,size in rows:
+              ratio=w/h if h else 99
+              if 20 <= w <= 96 and 20 <= h <= 96 and 0.72 <= ratio <= 1.38:
+                  candidates.append((p,w,h,mode,size))
+
+          # Copy with stable numeric ids so manual mapping is deterministic.
+          manifest=[]
+          for i,(p,w,h,mode,size) in enumerate(candidates,1):
+              ext=p.suffix.lower() or '.png'
+              dst=out/'candidates'/f'{i:04d}_{w}x{h}_{p.stem}{ext}'
+              shutil.copy2(p,dst)
+              manifest.append({'id':i,'source':str(p.relative_to(root)),'file':dst.name,'w':w,'h':h,'mode':mode,'bytes':size})
+          (out/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2))
+          with (out/'candidates.txt').open('w') as f:
+              for x in manifest:
+                  f.write(f"{x['id']:04d}\t{x['w']}x{x['h']}\t{x['source']}\t{x['file']}\n")
+
+          print('TOTAL_IMAGES',len(rows))
+          print('CANDIDATES',len(candidates))
+          print('TOP_DIMS',dims.most_common(25))
+
+          # Build contact sheets. 8 columns; each cell carries id + dimensions.
+          cell_w,cell_h=132,132
+          cols=8
+          per_page=64
+          font=ImageFont.load_default()
+          for page,start in enumerate(range(0,len(manifest),per_page),1):
+              part=manifest[start:start+per_page]
+              rr=math.ceil(len(part)/cols)
+              sheet=Image.new('RGB',(cols*cell_w,rr*cell_h),'#202020')
+              draw=ImageDraw.Draw(sheet)
+              for j,x in enumerate(part):
+                  r=j//cols; c=j%cols
+                  x0=c*cell_w; y0=r*cell_h
+                  p=out/'candidates'/x['file']
+                  try:
+                      im=Image.open(p).convert('RGBA')
+                      # checker-ish neutral backdrop via white; preserve alpha.
+                      thumb=Image.new('RGBA',(92,92),(245,245,245,255))
+                      im.thumbnail((84,84),Image.Resampling.NEAREST)
+                      thumb.alpha_composite(im,((92-im.width)//2,(92-im.height)//2))
+                      sheet.paste(thumb.convert('RGB'),(x0+20,y0+8))
+                  except Exception:
+                      pass
+                  draw.text((x0+6,y0+104),f"#{x['id']:04d} {x['w']}x{x['h']}",fill='white',font=font)
+                  src=Path(x['source']).name[:18]
+                  draw.text((x0+6,y0+117),src,fill='#c8c8c8',font=font)
+              sheet.save(out/'sheets'/f'candidates_{page:02d}.png',quality=95)
+          PY
+
+      - name: Upload skill icon extraction report
+        uses: actions/upload-artifact@v4
+        with:
+          name: reva-3.0ex-skill-icon-candidates
+          if-no-files-found: error
+          path: skill-icon-report/**
