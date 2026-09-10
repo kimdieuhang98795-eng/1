@@ -28,8 +28,11 @@ insert=marker+'''
 adb logcat -c
 adb shell input touchscreen swipe "$CTRL_X" "$CTRL_Y" "$CTRL_X" "$CTRL_Y" 420; sleep 1
 logs "$OUT_DIR/ex-ctrl-logcat.txt"; cat "$OUT_DIR/ex-ctrl-logcat.txt"
-[[ "$(grep -c 'REVA_DOMKEY.*DOWN:ControlLeft' "$OUT_DIR/ex-ctrl-logcat.txt" || true)" -eq 1 ]]
-[[ "$(grep -c 'REVA_DOMKEY.*UP:ControlLeft' "$OUT_DIR/ex-ctrl-logcat.txt" || true)" -eq 1 ]]
+# Anchor to the native REVA_DOMKEY tag. The WebView console mirrors the same
+# event as REVA_DOMKEY_EVENT, so a broad `REVA_DOMKEY.*` regex double-counts a
+# correct single down/up pair and produces a false regression.
+[[ "$(grep -c 'REVA_DOMKEY: DOWN:ControlLeft$' "$OUT_DIR/ex-ctrl-logcat.txt" || true)" -eq 1 ]]
+[[ "$(grep -c 'REVA_DOMKEY: UP:ControlLeft$' "$OUT_DIR/ex-ctrl-logcat.txt" || true)" -eq 1 ]]
 grep -q 'DOM_DOWN:ControlLeft:Control' "$OUT_DIR/ex-ctrl-logcat.txt"
 grep -q 'DOM_UP:ControlLeft:Control' "$OUT_DIR/ex-ctrl-logcat.txt"
 grep -q 'PRESS:CTRL' "$OUT_DIR/ex-ctrl-logcat.txt"
@@ -41,8 +44,8 @@ echo 'EX_CTRL PASS' | tee -a "$OUT_DIR/ex-ctrl-logcat.txt"
 adb logcat -c
 adb shell input touchscreen swipe "$BEX_X" "$BEX_Y" "$BEX_X" "$BEX_Y" 420; sleep 1
 logs "$OUT_DIR/ex-b-logcat.txt"; cat "$OUT_DIR/ex-b-logcat.txt"
-[[ "$(grep -c 'REVA_DOMKEY.*DOWN:KeyB' "$OUT_DIR/ex-b-logcat.txt" || true)" -eq 1 ]]
-[[ "$(grep -c 'REVA_DOMKEY.*UP:KeyB' "$OUT_DIR/ex-b-logcat.txt" || true)" -eq 1 ]]
+[[ "$(grep -c 'REVA_DOMKEY: DOWN:KeyB$' "$OUT_DIR/ex-b-logcat.txt" || true)" -eq 1 ]]
+[[ "$(grep -c 'REVA_DOMKEY: UP:KeyB$' "$OUT_DIR/ex-b-logcat.txt" || true)" -eq 1 ]]
 grep -q 'DOM_DOWN:KeyB:b' "$OUT_DIR/ex-b-logcat.txt"
 grep -q 'DOM_UP:KeyB:b' "$OUT_DIR/ex-b-logcat.txt"
 grep -q 'PRESS:B' "$OUT_DIR/ex-b-logcat.txt"
