@@ -37,18 +37,24 @@ jobs:
           echo '0333b56998a55bd83f4e0deb678a811fcdc45607582b4f5dd438309c8c3ad5ce  /tmp/ffdec.zip' | sha256sum -c -
           mkdir -p /tmp/ffdec && unzip -q /tmp/ffdec.zip -d /tmp/ffdec
 
-      - name: Export exact composite children
+      - name: Export exact composite children by tag type
         run: |
           set -euo pipefail
-          # Proven direct children of composite EX handlers plus shared layers
-          # needed to distinguish icon art from generic chrome/cooldown masks.
-          IDS='1770,1785,1899,3532,4085,4089,4150,4153,4207,4208,4210,4211,4269,4270,4273,4274'
-          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -selectid "$IDS" -format sprite:png -export sprite /tmp/export /tmp/game.swf > report/export.log 2>&1 || true
-          cp -a /tmp/export/. report/ || true
-          find report -type f | sort > report/files.txt
+          mkdir -p /tmp/export/{sprite,shape,morphshape}
+          # Sprite children used by Ranger B/SHIFT and shared chrome.
+          SPRITES='1770,1785,1899,3532,4153'
+          # Direct static icon layers proven inside composite EX handlers.
+          SHAPES='4207,4210,4269,4273'
+          # Paired transition/pressed-state layers.
+          MORPHS='4150,4208,4211,4270,4274'
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -selectid "$SPRITES" -format sprite:png -export sprite /tmp/export/sprite /tmp/game.swf > report/sprite-export.log 2>&1
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -selectid "$SHAPES" -format shape:png -export shape /tmp/export/shape /tmp/game.swf > report/shape-export.log 2>&1
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -selectid "$MORPHS" -format morphshape:png -export morphshape /tmp/export/morphshape /tmp/game.swf > report/morph-export.log 2>&1
+          cp -a /tmp/export/. report/assets/
+          find report/assets -type f | sort > report/files.txt
           test -s report/files.txt
 
-      - name: Analyze visible frames
+      - name: Analyze exact layers
         run: |
           set -euo pipefail
           python3 -m pip install --quiet pillow
@@ -57,42 +63,36 @@ jobs:
           from PIL import Image,ImageDraw,ImageFont
           import re,json,math
           rows=[]
-          for p in sorted(Path('report').rglob('*.png')):
-              m=re.search(r'DefineSprite_(\d+)',str(p))
+          for p in sorted(Path('report/assets').rglob('*.png')):
+              m=re.search(r'(DefineSprite|DefineShape\d*|DefineMorphShape\d*)_(\d+)',str(p))
               if not m: continue
-              sid=int(m.group(1)); frame=int(p.stem) if p.stem.isdigit() else -1
-              im=Image.open(p).convert('RGBA'); a=im.getchannel('A')
-              vis=sum(v>8 for v in a.getdata())
-              bbox=a.getbbox()
-              rows.append({'sprite':sid,'frame':frame,'w':im.width,'h':im.height,'visible':vis,'bbox':bbox,'file':str(p)})
+              kind=m.group(1); sid=int(m.group(2)); frame=int(p.stem) if p.stem.isdigit() else -1
+              im=Image.open(p).convert('RGBA'); a=im.getchannel('A'); vis=sum(v>8 for v in a.getdata()); bbox=a.getbbox()
+              rows.append({'kind':kind,'id':sid,'frame':frame,'w':im.width,'h':im.height,'visible':vis,'bbox':bbox,'file':str(p)})
           Path('report/inner-visuals.json').write_text(json.dumps(rows,indent=2))
           with Path('report/inner-visuals.tsv').open('w') as f:
-              f.write('sprite\tframe\tw\th\tvisible\tbbox\tfile\n')
-              for r in rows:
-                  f.write(f"{r['sprite']}\t{r['frame']}\t{r['w']}\t{r['h']}\t{r['visible']}\t{r['bbox']}\t{r['file']}\n")
-          # One representative frame per sprite: choose the non-empty frame with
-          # largest visible area, so composite animation/cooldown frames do not
-          # hide the static button art in the contact sheet.
+              f.write('kind\tid\tframe\tw\th\tvisible\tbbox\tfile\n')
+              for r in rows: f.write(f"{r['kind']}\t{r['id']}\t{r['frame']}\t{r['w']}\t{r['h']}\t{r['visible']}\t{r['bbox']}\t{r['file']}\n")
+          # One useful representative per (kind,id), preferring largest visible state.
           best={}
           for r in rows:
               if r['visible']<=0: continue
-              if r['sprite'] not in best or r['visible']>best[r['sprite']]['visible']:
-                  best[r['sprite']]=r
+              k=(r['kind'],r['id'])
+              if k not in best or r['visible']>best[k]['visible']: best[k]=r
+          vals=[best[k] for k in sorted(best,key=lambda x:(x[1],x[0]))]
           font=ImageFont.load_default(); cell=190; cols=4
-          vals=[best[k] for k in sorted(best)]
           sheet=Image.new('RGB',(cols*cell,math.ceil(max(1,len(vals))/cols)*cell),(25,25,25)); d=ImageDraw.Draw(sheet)
           for i,r in enumerate(vals):
-              p=Path(r['file']); im=Image.open(p).convert('RGBA'); im.thumbnail((145,130),Image.Resampling.NEAREST)
+              im=Image.open(r['file']).convert('RGBA'); im.thumbnail((145,130),Image.Resampling.NEAREST)
               x=(i%cols)*cell; y=(i//cols)*cell
-              bg=Image.new('RGBA',(150,135),(225,225,225,255)); bg.alpha_composite(im,((150-im.width)//2,(135-im.height)//2))
-              sheet.paste(bg.convert('RGB'),(x+20,y+5))
-              d.text((x+6,y+145),f"sprite {r['sprite']} frame {r['frame']}",fill='white',font=font)
-              d.text((x+6,y+160),f"{r['w']}x{r['h']} visible={r['visible']}",fill=(190,190,190),font=font)
+              bg=Image.new('RGBA',(150,135),(225,225,225,255)); bg.alpha_composite(im,((150-im.width)//2,(135-im.height)//2)); sheet.paste(bg.convert('RGB'),(x+20,y+5))
+              d.text((x+5,y+145),f"{r['kind']} {r['id']} f{r['frame']}",fill='white',font=font)
+              d.text((x+5,y+160),f"{r['w']}x{r['h']} px={r['visible']}",fill=(190,190,190),font=font)
           sheet.save('report/inner-visuals.png')
-          print('SPRITES',len(best),'FRAMES',len(rows))
+          print('LAYERS',len(best),'FILES',len(rows))
           assert best
           PY
-          cat report/inner-visuals.tsv | head -80
+          cat report/inner-visuals.tsv
 
       - name: Upload exact inner visual evidence
         uses: actions/upload-artifact@v4
