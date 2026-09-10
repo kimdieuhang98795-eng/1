@@ -5,6 +5,7 @@ import sys
 root = Path(sys.argv[1] if len(sys.argv) > 1 else '.')
 main = root / 'app/src/main/java/com/ajiu/reva/MainActivity.java'
 gradle = root / 'app/build.gradle'
+check_project = root / 'tools/check_project.py'
 config_dst = root / 'app/src/main/java/com/ajiu/reva/ControlLayoutConfig.java'
 config_src = Path(__file__).with_name('ControlLayoutConfig.java')
 
@@ -67,6 +68,18 @@ g = g.replace('versionCode 19', 'versionCode 20', 1).replace("versionName '1.9'"
 gradle.write_text(g)
 main.write_text(s)
 
+# Keep the inherited project checker version-aware. v1.10 was initially
+# rejected here even though the transform itself passed, because v1.5 QA only
+# knew the V18/V19 marker whitelist.
+if check_project.exists():
+    q = check_project.read_text()
+    old = "['LAYOUT:MODERN_V18','LAYOUT:MODERN_V19']"
+    new = "['LAYOUT:MODERN_V18','LAYOUT:MODERN_V19','LAYOUT:MODERN_V110']"
+    if old not in q:
+        raise SystemExit('v1.10 QA marker whitelist needle missing')
+    q = q.replace(old, new, 1)
+    check_project.write_text(q)
+
 # ---------------------------------------------------------------------------
 # 3) Regression guards. v1.10 is a narrowly-scoped completeness patch.
 # ---------------------------------------------------------------------------
@@ -105,5 +118,11 @@ for token in [
     if token not in cfg:
         raise SystemExit('v1.10 missing EX control: ' + token)
 
+if check_project.exists():
+    q = check_project.read_text()
+    if "'LAYOUT:MODERN_V110'" not in q:
+        raise SystemExit('v1.10 project QA is not version-aware')
+
 print('PASS apply_v110: Ctrl/B EX controls + DOM mapping + unconditional release coverage')
 print('PASS apply_v110: v1.9 pointer router, skill paging and tactile feedback preserved')
+print('PASS apply_v110: inherited QA accepts LAYOUT:MODERN_V110')
