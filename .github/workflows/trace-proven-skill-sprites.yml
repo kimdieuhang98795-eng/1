@@ -65,8 +65,6 @@ jobs:
           found={}
           for p in root.rglob('*.as'):
             rel=str(p.relative_to(root))
-            # FFDec nests exports under /tmp/scripts/scripts/DefineSprite_xxx/...
-            # so the sprite component can occur after an extra directory prefix.
             m=re.search(r'(?:^|/)DefineSprite_(\d+)(?:/|$)',rel)
             if not m:
               continue
@@ -77,8 +75,7 @@ jobs:
             text=p.read_text(errors='ignore')
             for code,key in keycodes:
               if re.search(rf'Key\.isDown\({code}\)',text):
-                k=(cls,key,code,sid)
-                found.setdefault(k,[]).append(rel)
+                found.setdefault((cls,key,code,sid),[]).append(rel)
 
           rows=[]
           for (cls,key,code,sid),scripts in sorted(found.items(),key=lambda x:(list(classes).index(x[0][0]),x[0][1],x[0][3])):
@@ -91,7 +88,6 @@ jobs:
             for r in rows:
               f.write(f"{r['class']}\t{r['key']}\t{r['keyCode']}\t{r['spriteId']}\t{len(r['scripts'])}\n")
 
-          # Hard evidence from the original AS2. These 16 mappings must stay exact.
           expected={
             ('Spitfire','SHIFT'):4088,('Spitfire','B'):4092,('Spitfire','CTRL'):4103,('Spitfire','SPACE'):4110,
             ('Ranger','SHIFT'):4155,('Ranger','B'):4151,('Ranger','CTRL'):4165,('Ranger','SPACE'):4172,
@@ -105,14 +101,17 @@ jobs:
 
           ids=sorted({r['spriteId'] for r in rows})
           out.joinpath('handler-sprite-ids.txt').write_text(','.join(map(str,ids))+'\n')
-          out.joinpath('handler-frame-selection.txt').write_text(','.join(f'{x}:1' for x in ids)+'\n')
-          out.joinpath('handler-summary.txt').write_text(f'HANDLER_ROWS={len(rows)}\nUNIQUE_HANDLER_SPRITES={len(ids)}\nEX_MAPPINGS_PROVEN={len(expected)}\n')
+          # Frame 1 is commonly locked/disabled. Original AS2 moves many
+          # weapon/master/awakening handlers to frame 2 when unlocked.
+          out.joinpath('handler-frame-selection.txt').write_text(','.join(f'{x}:1-2' for x in ids)+'\n')
+          out.joinpath('handler-summary.txt').write_text(
+            f'HANDLER_ROWS={len(rows)}\nUNIQUE_HANDLER_SPRITES={len(ids)}\nEX_MAPPINGS_PROVEN={len(expected)}\nFRAME_RANGE=1-2\n')
           print('HANDLER_ROWS',len(rows),'UNIQUE',len(ids),'EX_PROVEN',len(expected))
           if len(rows) < 50 or len(ids) < 45:
             raise SystemExit('Unexpectedly sparse handler map')
           PY
 
-      - name: Export only proven handler sprites
+      - name: Export locked and unlocked handler sprite states
         run: |
           set -euo pipefail
           mkdir -p /tmp/sprites report/sprites
@@ -134,40 +133,59 @@ jobs:
           echo "SPRITE_FILES=$count" | tee -a report/sprite-export-status.txt
           cp -a /tmp/sprites/. report/sprites/ || true
           test "$rc" -eq 0
-          test "$count" -ge 40
+          test "$count" -ge 70
 
-      - name: Build handler sprite contact sheets
+      - name: Build state map and contact sheets
         run: |
           set -euo pipefail
           python3 -m pip install --quiet pillow
           mkdir -p report/sheets
           python3 - <<'PY'
           from pathlib import Path
-          from PIL import Image,ImageDraw,ImageFont
+          from PIL import Image,ImageDraw,ImageFont,ImageChops
           import math,json,re
           root=Path('report/sprites')
+          handlers=json.loads(Path('report/handler-map.json').read_text())
+          by_id={r['spriteId']:r for r in handlers}
           imgs=[]
+          states=[]
           for p in sorted(root.rglob('*.png')):
             try:
-              with Image.open(p) as im: w,h=im.size
-              m=re.search(r'DefineSprite_(\d+)',str(p))
-              imgs.append((p,w,h,int(m.group(1)) if m else -1))
-            except Exception: pass
-          Path('report/sprite-dimensions.json').write_text(json.dumps([
-            {'file':str(p.relative_to(root)),'w':w,'h':h,'spriteId':sid} for p,w,h,sid in imgs
-          ],indent=2))
-          cell=150; cols=6; per=36; font=ImageFont.load_default()
+              with Image.open(p) as im:
+                w,h=im.size
+                rgba=im.convert('RGBA')
+                alpha=rgba.getchannel('A')
+                bbox=alpha.getbbox()
+                visible=0 if bbox is None else sum(1 for v in alpha.getdata() if v>8)
+              m=re.search(r'DefineSprite_(\d+)',str(p)); sid=int(m.group(1)) if m else -1
+              fm=re.match(r'(\d+)',p.stem); frame=int(fm.group(1)) if fm else -1
+              meta=by_id.get(sid,{})
+              row={'file':str(p.relative_to(root)),'w':w,'h':h,'spriteId':sid,'frame':frame,
+                   'class':meta.get('class'),'key':meta.get('key'),'visiblePixels':visible}
+              states.append(row); imgs.append((p,w,h,sid,frame,meta.get('class','?'),meta.get('key','?'),visible))
+            except Exception:
+              pass
+          Path('report/sprite-states.json').write_text(json.dumps(states,indent=2,ensure_ascii=False))
+          with Path('report/sprite-states.tsv').open('w') as f:
+            f.write('class\tkey\tspriteId\tframe\tw\th\tvisiblePixels\tfile\n')
+            for x in states:
+              f.write(f"{x['class']}\t{x['key']}\t{x['spriteId']}\t{x['frame']}\t{x['w']}\t{x['h']}\t{x['visiblePixels']}\t{x['file']}\n")
+
+          cell=156; cols=6; per=36; font=ImageFont.load_default()
           for page,start in enumerate(range(0,len(imgs),per),1):
-            part=imgs[start:start+per]; rows=math.ceil(len(part)/cols)
-            sheet=Image.new('RGB',(cols*cell,rows*cell),(28,28,28)); d=ImageDraw.Draw(sheet)
-            for j,(p,w,h,sid) in enumerate(part):
+            part=imgs[start:start+per]; rr=math.ceil(len(part)/cols)
+            sheet=Image.new('RGB',(cols*cell,rr*cell),(28,28,28)); d=ImageDraw.Draw(sheet)
+            for j,(p,w,h,sid,frame,cls,key,visible) in enumerate(part):
               r=j//cols; c=j%cols; x0=c*cell; y0=r*cell
-              im=Image.open(p).convert('RGBA'); im.thumbnail((112,112),Image.Resampling.LANCZOS)
-              bg=Image.new('RGBA',(116,116),(235,235,235,255)); bg.alpha_composite(im,((116-im.width)//2,(116-im.height)//2))
-              sheet.paste(bg.convert('RGB'),(x0+17,y0+4))
-              d.text((x0+5,y0+123),f'Sprite {sid}  {w}x{h}',fill='white',font=font)
-            sheet.save(Path('report/sheets')/f'handler-sprites-{page:02d}.png')
-          print('CONTACT_SHEET_IMAGES',len(imgs))
+              im=Image.open(p).convert('RGBA'); im.thumbnail((116,108),Image.Resampling.LANCZOS)
+              bg=Image.new('RGBA',(120,112),(235,235,235,255)); bg.alpha_composite(im,((120-im.width)//2,(112-im.height)//2))
+              sheet.paste(bg.convert('RGB'),(x0+18,y0+3))
+              d.text((x0+4,y0+118),f'{cls[:5]} {key}  id{sid} f{frame}',fill='white',font=font)
+              d.text((x0+4,y0+132),f'{w}x{h} px:{visible}',fill=(195,195,195),font=font)
+            sheet.save(Path('report/sheets')/f'handler-states-{page:02d}.png')
+          print('STATE_IMAGES',len(imgs))
+          if len(imgs)<70:
+            raise SystemExit('Too few state images')
           PY
 
       - name: Validate trace
@@ -176,8 +194,9 @@ jobs:
           test -s report/handler-map.json
           test -s report/handler-sprite-ids.txt
           test -s report/sprite-files.txt
-          test -s report/sprite-dimensions.json
+          test -s report/sprite-states.json
           grep -q 'EX_MAPPINGS_PROVEN=16' report/handler-summary.txt
+          grep -q 'FRAME_RANGE=1-2' report/handler-summary.txt
           grep -q 'SPRITE_EXPORT_EXIT=0' report/sprite-export-status.txt
 
       - name: Upload proven sprite trace
