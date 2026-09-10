@@ -1,0 +1,243 @@
+name: Build Reva Android v1.11 Original Skill HUD APK
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/build-v111-original-skill-hud.yml'
+      - 'v1.11/**'
+      - 'v1.10/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout source bootstrap and transforms
+        uses: actions/checkout@v4
+
+      - name: Reassemble baseline and apply v1.2 through v1.11
+        run: |
+          set -euo pipefail
+          cat archive/part00 archive/part01 archive/part02 archive/part03 archive/part04 archive/part05 archive/part06 archive/part07 archive/part08 > /tmp/reva.zip.b64
+          test "$(wc -c < /tmp/reva.zip.b64)" -eq 86132
+          base64 -d /tmp/reva.zip.b64 > /tmp/reva_v1_1.zip
+          echo '6ea5b7f9cd0d5a83e925de9199a17d4d8a969dad471e054ca681a9456747a3d2  /tmp/reva_v1_1.zip' | sha256sum -c -
+          rm -rf work && mkdir -p work
+          unzip -q /tmp/reva_v1_1.zip -d work
+          cd work/reva_android_wrapper_v1_1
+          cat "$GITHUB_WORKSPACE"/v1.2/mainpatch.part* > /tmp/v12-main.patch
+          patch -p0 --fuzz=0 < /tmp/v12-main.patch
+          python3 "$GITHUB_WORKSPACE/v1.3/apply_v13.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 "$GITHUB_WORKSPACE/v1.4/run_apply_v14_fixed.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 "$GITHUB_WORKSPACE/v1.4/finalize_v14.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 "$GITHUB_WORKSPACE/v1.5/apply_v15.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 "$GITHUB_WORKSPACE/v1.5/run_finalize_v15_fixed.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 "$GITHUB_WORKSPACE/v1.5/strengthen_v15.py" app/src/main/java/com/ajiu/reva/MainActivity.java
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle')
+          s=p.read_text().replace('versionCode 11','versionCode 16').replace("versionName '1.1'","versionName '1.6'")
+          p.write_text(s)
+          p=Path('app/src/main/assets/index.html')
+          s=p.read_text()
+          s=s.replace('优先使用 APK 内置 Ruffle；只有构建时未打包 Ruffle 才会尝试联网备用源。','Ruffle 与 3.0 EX 汉化本体均随 APK 内置；正常启动完全离线。')
+          s=s.replace('Ruffle 与 Final 本体均随 APK 内置；正常启动完全离线，联网仅用于可选修复 / 更换本体。','Ruffle 与 3.0 EX 汉化本体均随 APK 内置；正常启动完全离线。')
+          s=s.replace('从左上角菜单选择“智能获取本体”或“导入 / 替换原版 SWF”。','左上角菜单保留手动导入/修复功能；正常游玩无需下载其他本体。')
+          s=s.replace('window.__REVA_PLAYER_READY__=true;','window.__REVA_PLAYER_READY__=true; console.log(\'REVA_GAME_READY\');')
+          p.write_text(s)
+          p=Path('app/src/main/java/com/ajiu/reva/MainActivity.java')
+          s=p.read_text().replace('修复 / 更换本体（联网：4399 → Final 保存源 → 官方包）','修复 / 更换本体（会切换为其他兼容本体）')
+          s=s.replace('APK 已内置离线 game.swf','APK 已内置 3.0 EX 汉化 game.swf')
+          p.write_text(s)
+          PY
+          cp "$GITHUB_WORKSPACE/v1.3/qa_nav.html" app/src/main/assets/qa_nav.html
+          cp "$GITHUB_WORKSPACE/v1.5/qa_input.html" app/src/main/assets/qa_input.html
+          cp "$GITHUB_WORKSPACE/v1.5/check_project.py" tools/check_project.py
+          cp "$GITHUB_WORKSPACE/v1.5/emulator_smoke.sh" tools/emulator_smoke.sh
+          python3 "$GITHUB_WORKSPACE/v1.5/fix_emulator_smoke.py" tools/emulator_smoke.sh
+          python3 "$GITHUB_WORKSPACE/v1.6/fix_ex_smoke.py" tools/emulator_smoke.sh
+          python3 "$GITHUB_WORKSPACE/v1.7/fix_smoke_v17.py" tools/emulator_smoke.sh
+          python3 "$GITHUB_WORKSPACE/v1.7/apply_v17.py" .
+          python3 "$GITHUB_WORKSPACE/v1.8/apply_v18.py" .
+          python3 "$GITHUB_WORKSPACE/v1.9/apply_v19.py" .
+          python3 "$GITHUB_WORKSPACE/v1.10/apply_v110.py" .
+          python3 "$GITHUB_WORKSPACE/v1.10/fix_smoke_v110.py" tools/emulator_smoke.sh
+          python3 "$GITHUB_WORKSPACE/v1.11/apply_v111.py" .
+          python3 "$GITHUB_WORKSPACE/v1.11/fix_smoke_v111.py" tools/emulator_smoke.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tools/check_project.py')
+          s=p.read_text().replace('versionCode 15','versionCode 21').replace("versionName '1.5'","versionName '1.11'")
+          p.write_text(s)
+          PY
+          chmod +x tools/check_project.py tools/emulator_smoke.sh
+          cd ..
+          mv reva_android_wrapper_v1_1 reva_android_wrapper_v1_11
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4.0.1
+
+      - name: Install Android 35 SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Bundle pinned Ruffle self-hosted
+        working-directory: work/reva_android_wrapper_v1_11
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/assets/ruffle /tmp/ruffle_pkg
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/ruffle.zip "https://github.com/ruffle-rs/ruffle/releases/download/nightly-2026-09-05/ruffle-nightly-2026_09_05-web-selfhosted.zip"
+          unzip -q /tmp/ruffle.zip -d /tmp/ruffle_pkg
+          cp -a /tmp/ruffle_pkg/. app/src/main/assets/ruffle/
+          test -f app/src/main/assets/ruffle/ruffle.js
+          find app/src/main/assets/ruffle -maxdepth 1 -name '*.wasm' -print -quit | grep .
+
+      - name: Bundle pinned 3.0 EX SWF and external BGM resources
+        working-directory: work/reva_android_wrapper_v1_11
+        run: |
+          set -euo pipefail
+          rm -f app/src/main/assets/game.swf app/src/main/assets/game.swf.part
+          rm -rf app/src/main/assets/BGM
+          python3 "$GITHUB_WORKSPACE/v1.7/bundle_ex_assets.py" .
+          python3 tools/verify_swf.py app/src/main/assets/game.swf
+          test -s app/src/main/assets/BGM/BG.jpg
+          test -s app/src/main/assets/BGM/1602.mp3
+
+      - name: Export proven original 3.0 EX skill visuals
+        working-directory: work/reva_android_wrapper_v1_11
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/ffdec.zip 'https://github.com/jindrapetrik/jpexs-decompiler/releases/download/version26.2.1/ffdec_26.2.1.zip'
+          echo '0333b56998a55bd83f4e0deb678a811fcdc45607582b4f5dd438309c8c3ad5ce  /tmp/ffdec.zip' | sha256sum -c -
+          rm -rf /tmp/ffdec /tmp/skill-export && mkdir -p /tmp/ffdec /tmp/skill-export/{sprite,shape}
+          unzip -q /tmp/ffdec.zip -d /tmp/ffdec
+          python3 - <<'PY' > /tmp/skill-vars.sh
+          import json
+          from pathlib import Path
+          m=json.loads(Path('../../v1.11/skill_manifest.json').read_text())
+          sprites=set(); shapes=set()
+          for p in m['profiles'].values():
+            for e in p['skills'].values():
+              v=e['visual']
+              if isinstance(v,dict):
+                (sprites if v['type']=='sprite' else shapes).add(int(v['id']))
+          print('SPRITES='+','.join(map(str,sorted(sprites))))
+          print('FRAMES='+','.join(f'{x}:1' for x in sorted(sprites)))
+          print('SHAPES='+','.join(map(str,sorted(shapes))))
+          PY
+          source /tmp/skill-vars.sh
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -selectid "$SPRITES" -select "$FRAMES" -format sprite:png -export sprite /tmp/skill-export/sprite app/src/main/assets/game.swf
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -selectid "$SHAPES" -format shape:png -export shape /tmp/skill-export/shape app/src/main/assets/game.swf
+          python3 "$GITHUB_WORKSPACE/v1.11/prepare_skill_assets.py" . /tmp/skill-export
+          test "$(find app/src/main/assets/skill_icons -type f -name '*.png' | wc -l)" -ge 35
+
+      - name: Run v1.11 architecture and inherited local QA
+        working-directory: work/reva_android_wrapper_v1_11
+        run: |
+          set -euo pipefail
+          bash qa/run_local_qa.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          app=Path('app/build.gradle').read_text()
+          main=Path('app/src/main/java/com/ajiu/reva/MainActivity.java').read_text()
+          cfg=Path('app/src/main/java/com/ajiu/reva/ControlLayoutConfig.java').read_text()
+          painter=Path('app/src/main/java/com/ajiu/reva/SkillIconPainter.java').read_text()
+          smoke=Path('tools/emulator_smoke.sh').read_text()
+          assert "versionCode 21" in app and "versionName '1.11'" in app
+          for t in ['LAYOUT:MODERN_V111','currentSkillProfile()','cycleSkillProfile()','PROFILERECT:',
+                    'ROLE_JOYSTICK','ROLE_BUTTON','ROLE_GAME','dispatchDomKey(','forceDomReleaseAll(',
+                    'keys.put("CTRL", KeyEvent.KEYCODE_CTRL_LEFT)','kickButtonFeedback(B b)']:
+              assert t in main,t
+          for t in ['profileButton','PROFILE','CTRL','SHIFT','SPACE','B']:
+              assert t in cfg,t
+          for t in ['Spitfire:A','Ranger:T','Berserker:SPACE','WeaponMaster:CTRL','skill_icons/']:
+              assert t in painter,t
+          for t in ['PROFILE_SWITCH PASS','PROFILE:Ranger:漫游','LAYOUT:MODERN_V111']:
+              assert t in smoke,t
+          assert 'LAYOUT:MODERN_V110' not in main
+          icons=list(Path('app/src/main/assets/skill_icons').rglob('*.png'))
+          manifest=json.loads(Path('../../v1.11/skill_manifest.json').read_text())
+          expected=sum(isinstance(e['visual'],dict) for p in manifest['profiles'].values() for e in p['skills'].values())
+          assert len(icons)==expected,(len(icons),expected)
+          print('PASS v1.11 structure: original skill assets',len(icons),'profiles=4')
+          print('PASS v1.11 structure: v1.10 input router and EX semantics preserved')
+          PY
+
+      - name: Build debug APK
+        working-directory: work/reva_android_wrapper_v1_11
+        run: gradle --no-daemon assembleDebug
+
+      - name: Inspect APK contents and metadata
+        working-directory: work/reva_android_wrapper_v1_11
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -f "$APK"
+          sha256sum "$APK" | tee app-debug.apk.sha256
+          unzip -l "$APK" | tee apk-files.txt
+          grep -E 'assets/game.swf|assets/BGM/BG.jpg|assets/ruffle/ruffle.js|assets/skill_icons/.+\.png' apk-files.txt
+          [[ "$(grep -c 'assets/BGM/.*\.mp3' apk-files.txt)" -eq 13 ]]
+          [[ "$(grep -c 'assets/skill_icons/.*\.png' apk-files.txt)" -ge 35 ]]
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee apk-badging.txt
+          grep -q "package: name='com.ajiu.reva'" apk-badging.txt
+          grep -q "versionCode='21'" apk-badging.txt
+          grep -q "versionName='1.11'" apk-badging.txt
+          grep -q "targetSdkVersion:'35'" apk-badging.txt
+
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Android 35 emulator profile/original-HUD/input regression
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 3072M
+          heap-size: 512M
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            adb shell settings put secure immersive_mode_confirmations confirmed || true
+            bash work/reva_android_wrapper_v1_11/tools/emulator_smoke.sh work/reva_android_wrapper_v1_11/app/build/outputs/apk/debug/app-debug.apk work/reva_android_wrapper_v1_11/qa/emulator
+            adb logcat -d | grep 'LAYOUT:MODERN_V111' | tail -1 | tee work/reva_android_wrapper_v1_11/qa/emulator/layout-v111.log
+            test -s work/reva_android_wrapper_v1_11/qa/emulator/layout-v111.log
+            grep -q 'EX_CTRL PASS' work/reva_android_wrapper_v1_11/qa/emulator/ex-ctrl-logcat.txt
+            grep -q 'EX_B PASS' work/reva_android_wrapper_v1_11/qa/emulator/ex-b-logcat.txt
+            grep -q 'PROFILE_SWITCH PASS' work/reva_android_wrapper_v1_11/qa/emulator/profile-switch-logcat.txt
+
+      - name: Upload v1.11 APK and QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reva-android-v1.11-original-skill-hud
+          if-no-files-found: warn
+          path: |
+            work/reva_android_wrapper_v1_11/app/build/outputs/apk/debug/app-debug.apk
+            work/reva_android_wrapper_v1_11/app-debug.apk.sha256
+            work/reva_android_wrapper_v1_11/apk-badging.txt
+            work/reva_android_wrapper_v1_11/apk-files.txt
+            work/reva_android_wrapper_v1_11/bundled-game.txt
+            work/reva_android_wrapper_v1_11/skill_asset_index.txt
+            work/reva_android_wrapper_v1_11/app/src/main/assets/skill_icons/**
+            work/reva_android_wrapper_v1_11/qa/emulator/**
