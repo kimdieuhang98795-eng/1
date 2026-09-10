@@ -21,6 +21,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Initialize trace report
+        run: |
+          set -euo pipefail
+          mkdir -p skill-symbol-report
+          {
+            echo "workflow_sha=${GITHUB_SHA}"
+            echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > skill-symbol-report/run-info.txt
+
       - name: Download pinned 3.0 EX and FFDec
         run: |
           set -euo pipefail
@@ -36,12 +45,15 @@ jobs:
           curl -fL --retry 3 --retry-delay 2 -o /tmp/ffdec.zip 'https://github.com/jindrapetrik/jpexs-decompiler/releases/download/version26.2.1/ffdec_26.2.1.zip'
           echo '0333b56998a55bd83f4e0deb678a811fcdc45607582b4f5dd438309c8c3ad5ce  /tmp/ffdec.zip' | sha256sum -c -
           mkdir -p /tmp/ffdec && unzip -q /tmp/ffdec.zip -d /tmp/ffdec
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -help export > skill-symbol-report/ffdec-export-help.txt 2>&1 || true
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -help format > skill-symbol-report/ffdec-format-help.txt 2>&1 || true
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -help select > skill-symbol-report/ffdec-select-help.txt 2>&1 || true
 
       - name: Export ActionScript
         run: |
           set -euo pipefail
           mkdir -p /tmp/scripts skill-symbol-report/scripts
-          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -export script /tmp/scripts /tmp/game.swf | tee skill-symbol-report/script-export.log
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -export script /tmp/scripts /tmp/game.swf 2>&1 | tee skill-symbol-report/script-export.log
           find /tmp/scripts -type f | sort > skill-symbol-report/script-files.txt
           echo "SCRIPT_FILES=$(wc -l < skill-symbol-report/script-files.txt)"
           cp -a /tmp/scripts/. skill-symbol-report/scripts/
@@ -63,27 +75,53 @@ jobs:
           rx=re.compile('|'.join('(?:'+p+')' for p in pats),re.I)
           out=[]
           for p in root.rglob('*'):
-            if not p.is_file(): continue
-            try: lines=p.read_text(errors='ignore').splitlines()
-            except: continue
+            if not p.is_file():
+              continue
+            try:
+              lines=p.read_text(errors='ignore').splitlines()
+            except Exception:
+              continue
             for i,line in enumerate(lines):
               if rx.search(line):
                 a=max(0,i-3); b=min(len(lines),i+4)
                 out.append('\n### '+str(p.relative_to(root))+f':{i+1}\n'+'\n'.join(f'{j+1:05d}: {lines[j]}' for j in range(a,b)))
           Path('skill-symbol-report/key-mapping-hits.txt').write_text('\n'.join(out),errors='ignore')
+          Path('skill-symbol-report/key-mapping-summary.txt').write_text(f'KEY_HIT_BLOCKS={len(out)}\n')
           print('KEY_HIT_BLOCKS',len(out))
           PY
 
-      - name: Export first frame of all sprites and buttons
+      - name: Export visual symbol sources
         run: |
-          set -euo pipefail
-          mkdir -p /tmp/sprites /tmp/buttons
-          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -select 'all:1' -format sprite:png -export sprite /tmp/sprites /tmp/game.swf | tee skill-symbol-report/sprite-export.log
-          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore -format button:png -export button /tmp/buttons /tmp/game.swf | tee skill-symbol-report/button-export.log
+          set -u
+          mkdir -p /tmp/sprites /tmp/buttons /tmp/images
+          : > skill-symbol-report/visual-export-status.txt
+
+          run_export() {
+            kind="$1"
+            outdir="$2"
+            logfile="skill-symbol-report/${kind}-export.log"
+            shift 2
+            set +e
+            java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar "$@" 2>&1 | tee "$logfile"
+            rc=${PIPESTATUS[0]}
+            set -e
+            echo "${kind}_exit=${rc}" | tee -a skill-symbol-report/visual-export-status.txt
+            return 0
+          }
+
+          set -e
+          run_export sprite /tmp/sprites -onerror ignore -select 'all:1' -format sprite:png -export sprite /tmp/sprites /tmp/game.swf
+          run_export button /tmp/buttons -onerror ignore -format button:png -export button /tmp/buttons /tmp/game.swf
+          run_export image /tmp/images -onerror ignore -format image:png -export image /tmp/images /tmp/game.swf
+
           find /tmp/sprites -type f | sort > skill-symbol-report/sprite-files.txt
           find /tmp/buttons -type f | sort > skill-symbol-report/button-files.txt
-          echo "SPRITE_FILES=$(wc -l < skill-symbol-report/sprite-files.txt)"
-          echo "BUTTON_FILES=$(wc -l < skill-symbol-report/button-files.txt)"
+          find /tmp/images -type f | sort > skill-symbol-report/image-files.txt
+          {
+            echo "SPRITE_FILES=$(wc -l < skill-symbol-report/sprite-files.txt)"
+            echo "BUTTON_FILES=$(wc -l < skill-symbol-report/button-files.txt)"
+            echo "IMAGE_FILES=$(wc -l < skill-symbol-report/image-files.txt)"
+          } | tee skill-symbol-report/visual-file-counts.txt
 
       - name: Build small-symbol candidate sheets
         run: |
@@ -94,46 +132,90 @@ jobs:
           from pathlib import Path
           from PIL import Image,ImageDraw,ImageFont
           import json,math,shutil
-          roots=[('sprite',Path('/tmp/sprites')),('button',Path('/tmp/buttons'))]
+
+          roots=[
+            ('sprite',Path('/tmp/sprites')),
+            ('button',Path('/tmp/buttons')),
+            ('image',Path('/tmp/images')),
+          ]
           out=Path('skill-symbol-report')
           rows=[]
+          rejected={'too_small_or_large':0,'aspect':0,'unreadable':0}
           for kind,root in roots:
+            if not root.exists():
+              continue
             for p in sorted(root.rglob('*')):
-              if not p.is_file(): continue
+              if not p.is_file():
+                continue
               try:
                 with Image.open(p) as im:
                   w,h=im.size
-                if 18<=w<=120 and 18<=h<=120 and 0.55<=w/max(h,1)<=1.75:
-                  rows.append((kind,p,w,h,root))
-              except: pass
+                if not (18<=w<=160 and 18<=h<=160):
+                  rejected['too_small_or_large']+=1
+                  continue
+                if not (0.45<=w/max(h,1)<=2.20):
+                  rejected['aspect']+=1
+                  continue
+                rows.append((kind,p,w,h,root))
+              except Exception:
+                rejected['unreadable']+=1
+
           manifest=[]
           for i,(kind,p,w,h,root) in enumerate(rows,1):
             ext=p.suffix.lower() or '.png'
             dst=out/'symbol_candidates'/f'{i:05d}_{kind}_{w}x{h}_{p.stem}{ext}'
             shutil.copy2(p,dst)
             manifest.append({'id':i,'kind':kind,'w':w,'h':h,'source':str(p.relative_to(root)),'file':dst.name})
+
           (out/'symbol-manifest.json').write_text(json.dumps(manifest,indent=2,ensure_ascii=False))
+          (out/'symbol-summary.txt').write_text(
+            f'SMALL_SYMBOL_CANDIDATES={len(manifest)}\n'
+            + '\n'.join(f'REJECTED_{k.upper()}={v}' for k,v in rejected.items()) + '\n'
+          )
           print('SMALL_SYMBOL_CANDIDATES',len(manifest))
+
           cell=128; cols=8; per=64; font=ImageFont.load_default()
           for page,start in enumerate(range(0,len(manifest),per),1):
-            part=manifest[start:start+per]; rr=math.ceil(len(part)/cols)
-            sh=Image.new('RGB',(cols*cell,rr*cell),(28,28,28)); d=ImageDraw.Draw(sh)
+            part=manifest[start:start+per]
+            rr=math.ceil(len(part)/cols)
+            sh=Image.new('RGB',(cols*cell,rr*cell),(28,28,28))
+            d=ImageDraw.Draw(sh)
             for j,x in enumerate(part):
-              r=j//cols;c=j%cols;x0=c*cell;y0=r*cell
+              r=j//cols; c=j%cols; x0=c*cell; y0=r*cell
               p=out/'symbol_candidates'/x['file']
               try:
-                im=Image.open(p).convert('RGBA'); im.thumbnail((88,88),Image.Resampling.LANCZOS)
-                bg=Image.new('RGBA',(92,92),(235,235,235,255)); bg.alpha_composite(im,((92-im.width)//2,(92-im.height)//2))
+                im=Image.open(p).convert('RGBA')
+                im.thumbnail((88,88),Image.Resampling.LANCZOS)
+                bg=Image.new('RGBA',(92,92),(235,235,235,255))
+                bg.alpha_composite(im,((92-im.width)//2,(92-im.height)//2))
                 sh.paste(bg.convert('RGB'),(x0+18,y0+5))
-              except: pass
+              except Exception:
+                pass
               d.text((x0+4,y0+101),f"#{x['id']:05d} {x['kind'][0]} {x['w']}x{x['h']}",fill='white',font=font)
               d.text((x0+4,y0+114),Path(x['source']).name[:18],fill=(195,195,195),font=font)
             sh.save(out/'sheets'/f'symbols_{page:03d}.png')
           PY
 
       - name: Upload trace report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: reva-3.0ex-skill-symbol-trace
-          if-no-files-found: error
+          if-no-files-found: warn
           path: skill-symbol-report/**
+
+      - name: Validate trace usefulness
+        if: always()
+        run: |
+          set -euo pipefail
+          test -s skill-symbol-report/key-mapping-hits.txt
+          test -s skill-symbol-report/symbol-manifest.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('skill-symbol-report/symbol-manifest.json')
+          data=json.loads(p.read_text())
+          print('validated_symbol_candidates',len(data))
+          if not data:
+            raise SystemExit('No visual symbol candidates were produced; inspect uploaded FFDec logs.')
+          PY
