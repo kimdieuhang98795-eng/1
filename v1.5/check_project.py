@@ -41,8 +41,8 @@ if modern_layout:
     # v1.8+ moved visual construction out of MainActivity. Verify the semantic
     # action still exists in config rather than demanding the legacy addCircle call.
     assert 'ButtonSpec.circle("↓", "后跳", PULSE' in config
-    for k in ['ControlLayoutConfig.modern()','LAYOUT:MODERN_V18']:
-        assert k in s,k
+    assert 'ControlLayoutConfig.modern()' in s
+    assert any(marker in s for marker in ['LAYOUT:MODERN_V18','LAYOUT:MODERN_V19']), 'modern layout marker'
 else:
     assert 'addCircle("↓","后",MODE_PULSE' in s
 assert 'Vertical arrows are not movement in this game' in s
