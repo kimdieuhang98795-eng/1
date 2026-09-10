@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "source": {
+    "edition": "Reva 3.0 EX Chinese",
+    "swfSha256": "0c7904469438078919c705dc7d0da11a9e0595fce29decd68f84599b25d3f457",
+    "rule": "Only proven original SWF visuals are referenced. transparent-original means frame 1 is genuinely non-visible and no replacement art is fabricated."
+  },
+  "profiles": {
+    "Spitfire": {
+      "label": "弹药",
+      "skills": {
+        "A": {"handler":4064,"visual":"transparent-original"},
+        "S": {"handler":4066,"visual":"transparent-original"},
+        "D": {"handler":4068,"visual":"transparent-original"},
+        "F": {"handler":4060,"visual":{"type":"sprite","id":4060,"frame":1}},
+        "G": {"handler":4056,"visual":{"type":"sprite","id":4056,"frame":1}},
+        "H": {"handler":4054,"visual":{"type":"sprite","id":4054,"frame":1}},
+        "Q": {"handler":4070,"visual":"transparent-original"},
+        "W": {"handler":4083,"visual":"transparent-original"},
+        "E": {"handler":4074,"visual":"transparent-original"},
+        "R": {"handler":4076,"visual":"transparent-original"},
+        "T": {"handler":4072,"visual":"transparent-original"},
+        "Y": {"handler":4078,"visual":{"type":"sprite","id":4078,"frame":1}},
+        "SHIFT": {"handler":4088,"visual":{"type":"sprite","id":4086,"frame":1}},
+        "B": {"handler":4092,"visual":{"type":"sprite","id":4090,"frame":1}},
+        "CTRL": {"handler":4103,"visual":{"type":"sprite","id":4099,"frame":1}},
+        "SPACE": {"handler":4110,"visual":{"type":"sprite","id":4105,"frame":1}}
+      }
+    },
+    "Ranger": {
+      "label": "漫游",
+      "skills": {
+        "A": {"handler":4121,"visual":"transparent-original"},
+        "S": {"handler":4123,"visual":"transparent-original"},
+        "D": {"handler":4125,"visual":{"type":"sprite","id":4125,"frame":1}},
+        "F": {"handler":4128,"visual":{"type":"sprite","id":4128,"frame":1}},
+        "G": {"handler":4149,"visual":{"type":"sprite","id":4149,"frame":1}},
+        "H": {"handler":4133,"visual":{"type":"sprite","id":4133,"frame":1}},
+        "Q": {"handler":4130,"visual":{"type":"sprite","id":4130,"frame":1}},
+        "W": {"handler":4136,"visual":{"type":"sprite","id":4136,"frame":1}},
+        "E": {"handler":4138,"visual":{"type":"sprite","id":4138,"frame":1}},
+        "R": {"handler":4140,"visual":{"type":"sprite","id":4140,"frame":1}},
+        "T": {"handler":4147,"visual":{"type":"sprite","id":4147,"frame":1}},
+        "B": {"handler":4151,"visual":{"type":"sprite","id":1785,"frame":1}},
+        "SHIFT": {"handler":4155,"visual":{"type":"sprite","id":4153,"frame":1}},
+        "CTRL": {"handler":4165,"visual":{"type":"sprite","id":4163,"frame":1}},
+        "SPACE": {"handler":4172,"visual":{"type":"sprite","id":4168,"frame":1}}
+      }
+    },
+    "Berserker": {
+      "label": "狂战",
+      "skills": {
+        "A": {"handler":4176,"visual":{"type":"sprite","id":4176,"frame":1}},
+        "S": {"handler":4178,"visual":{"type":"sprite","id":4178,"frame":1}},
+        "D": {"handler":4182,"visual":{"type":"sprite","id":4182,"frame":1}},
+        "F": {"handler":4189,"visual":{"type":"sprite","id":4189,"frame":1}},
+        "G": {"handler":4185,"visual":{"type":"sprite","id":4185,"frame":1}},
+        "H": {"handler":4191,"visual":{"type":"sprite","id":4191,"frame":1}},
+        "Q": {"handler":4206,"visual":{"type":"sprite","id":4206,"frame":1}},
+        "W": {"handler":4193,"visual":{"type":"sprite","id":4193,"frame":1}},
+        "E": {"handler":4197,"visual":{"type":"sprite","id":4197,"frame":1}},
+        "R": {"handler":4200,"visual":{"type":"sprite","id":4200,"frame":1}},
+        "B": {"handler":4209,"visual":{"type":"sprite","id":1899,"frame":1}},
+        "SHIFT": {"handler":4213,"visual":{"type":"shape","id":4210}},
+        "CTRL": {"handler":4221,"visual":{"type":"sprite","id":4219,"frame":1}},
+        "SPACE": {"handler":4227,"visual":{"type":"sprite","id":4223,"frame":1}}
+      }
+    },
+    "WeaponMaster": {
+      "label": "剑魂",
+      "skills": {
+        "A": {"handler":4234,"visual":{"type":"sprite","id":4234,"frame":1}},
+        "D": {"handler":4242,"visual":{"type":"sprite","id":4242,"frame":1}},
+        "F": {"handler":4246,"visual":{"type":"sprite","id":4246,"frame":1}},
+        "G": {"handler":4251,"visual":{"type":"sprite","id":4251,"frame":1}},
+        "H": {"handler":4259,"visual":{"type":"sprite","id":4259,"frame":1}},
+        "Q": {"handler":4255,"visual":{"type":"sprite","id":4255,"frame":1}},
+        "W": {"handler":4263,"visual":{"type":"sprite","id":4263,"frame":1}},
+        "E": {"handler":4266,"visual":{"type":"sprite","id":4266,"frame":1}},
+        "SHIFT": {"handler":4272,"visual":{"type":"shape","id":4269}},
+        "B": {"handler":4276,"visual":{"type":"shape","id":4273}},
+        "CTRL": {"handler":4283,"visual":{"type":"sprite","id":4281,"frame":1}},
+        "SPACE": {"handler":4288,"visual":{"type":"sprite","id":4285,"frame":1}}
+      }
+    }
+  }
+}
