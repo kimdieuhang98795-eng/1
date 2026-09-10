@@ -11,6 +11,12 @@ def once(old,new):
         raise SystemExit('v1.10 smoke missing needle: '+old[:180].replace('\n','\\n'))
     s=s.replace(old,new,1)
 
+# XRECT is a suffix of BEXRECT. The old substring grep plus tail -1 therefore
+# returned the later BEXRECT line when asking for XRECT, making the legacy X
+# hold regression physically press B. Match the REVA_TOUCH field token exactly.
+once('''get_field(){ grep "$1" "$OUT_DIR/layout-logcat.txt" | tail -1 | sed "s/.*$1//" | awk '{print $1}'; }\n''','''get_field(){ grep -F "REVA_TOUCH: $1" "$OUT_DIR/layout-logcat.txt" | tail -1 | sed "s/.*REVA_TOUCH: $1//" | awk '{print $1}'; }
+''')
+
 once('''XRECT="$(get_field 'XRECT:')"; ARECT="$(get_field 'ARECT:')"; BACKRECT="$(get_field 'BACKRECT:')"; JOY="$(get_field 'JOY:')"\n[[ -n "$XRECT" && -n "$ARECT" && -n "$BACKRECT" && -n "$JOY" ]]\n''','''XRECT="$(get_field 'XRECT:')"; ARECT="$(get_field 'ARECT:')"; BACKRECT="$(get_field 'BACKRECT:')"; JOY="$(get_field 'JOY:')"
 CTRLRECT="$(get_field 'CTRLRECT:')"; BEXRECT="$(get_field 'BEXRECT:')"
 [[ -n "$XRECT" && -n "$ARECT" && -n "$BACKRECT" && -n "$JOY" && -n "$CTRLRECT" && -n "$BEXRECT" ]]
@@ -18,6 +24,8 @@ CTRLRECT="$(get_field 'CTRLRECT:')"; BEXRECT="$(get_field 'BEXRECT:')"
 
 once('''read X_X X_Y < <(center "$XRECT"); read A_X A_Y < <(center "$ARECT"); read B_X B_Y < <(center "$BACKRECT"); IFS=',' read -r J_X J_Y J_R <<< "$JOY"\n''','''read X_X X_Y < <(center "$XRECT"); read A_X A_Y < <(center "$ARECT"); read B_X B_Y < <(center "$BACKRECT"); IFS=',' read -r J_X J_Y J_R <<< "$JOY"
 read CTRL_X CTRL_Y < <(center "$CTRLRECT"); read BEX_X BEX_Y < <(center "$BEXRECT")
+printf 'PARSED_RECTS X=%s,%s A=%s,%s BACK=%s,%s CTRL=%s,%s BEX=%s,%s JOY=%s,%s,%s\n' "$X_X" "$X_Y" "$A_X" "$A_Y" "$B_X" "$B_Y" "$CTRL_X" "$CTRL_Y" "$BEX_X" "$BEX_Y" "$J_X" "$J_Y" "$J_R" | tee "$OUT_DIR/parsed-rects.txt"
+[[ "$X_X" -ne "$BEX_X" || "$X_Y" -ne "$BEX_Y" ]]
 ''')
 
 marker='''echo 'BACKSTEP_BUTTON PASS' | tee -a "$OUT_DIR/backstep-button.txt"\n'''
@@ -28,9 +36,6 @@ insert=marker+'''
 adb logcat -c
 adb shell input touchscreen swipe "$CTRL_X" "$CTRL_Y" "$CTRL_X" "$CTRL_Y" 420; sleep 1
 logs "$OUT_DIR/ex-ctrl-logcat.txt"; cat "$OUT_DIR/ex-ctrl-logcat.txt"
-# Anchor to the native REVA_DOMKEY tag. The WebView console mirrors the same
-# event as REVA_DOMKEY_EVENT, so a broad `REVA_DOMKEY.*` regex double-counts a
-# correct single down/up pair and produces a false regression.
 [[ "$(grep -c 'REVA_DOMKEY: DOWN:ControlLeft$' "$OUT_DIR/ex-ctrl-logcat.txt" || true)" -eq 1 ]]
 [[ "$(grep -c 'REVA_DOMKEY: UP:ControlLeft$' "$OUT_DIR/ex-ctrl-logcat.txt" || true)" -eq 1 ]]
 grep -q 'DOM_DOWN:ControlLeft:Control' "$OUT_DIR/ex-ctrl-logcat.txt"
@@ -54,7 +59,7 @@ echo 'EX_B PASS' | tee -a "$OUT_DIR/ex-b-logcat.txt"
 '''
 once(marker,insert)
 
-if 'EX_CTRL PASS' not in s or 'EX_B PASS' not in s or "CTRLRECT=" not in s:
+if 'EX_CTRL PASS' not in s or 'EX_B PASS' not in s or "CTRLRECT=" not in s or 'REVA_TOUCH: $1' not in s:
     raise SystemExit('v1.10 EX smoke insertion failed')
 p.write_text(s)
-print('PASS fix_smoke_v110: device-level Ctrl/B hold + DOM down/up regression')
+print('PASS fix_smoke_v110: exact layout fields + device-level Ctrl/B hold + DOM down/up regression')
