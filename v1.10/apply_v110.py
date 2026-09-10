@@ -40,6 +40,15 @@ once('''            +"[' ','Space',0],['Shift','ShiftLeft',1],['1','Digit1',0],[
 once('''            String shown="SPACE".equals(key)?"SP":"SHIFT".equals(key)?"SH":key;\n''','''            String shown="SPACE".equals(key)?"SP":"SHIFT".equals(key)?"SH":"CTRL".equals(key)?"CT":key;
 ''')
 
+# Log the new buttons so emulator QA can target the actual scaled rectangles,
+# rather than assuming a particular device resolution or letterbox offset.
+once('''            B x=findByLabel("X"), a=findByLabel("A"), back=findByLabel("↓");\n''','''            B x=findByLabel("X"), a=findByLabel("A"), back=findByLabel("↓"), ctrl=findByLabel("CTRL"), bex=findByLabel("B");
+''')
+once('''                if(back!=null) android.util.Log.i("REVA_TOUCH","BACKRECT:"+(loc[0]+Math.round(back.r.left))+","+(loc[1]+Math.round(back.r.top))+","+(loc[0]+Math.round(back.r.right))+","+(loc[1]+Math.round(back.r.bottom)));\n''','''                if(back!=null) android.util.Log.i("REVA_TOUCH","BACKRECT:"+(loc[0]+Math.round(back.r.left))+","+(loc[1]+Math.round(back.r.top))+","+(loc[0]+Math.round(back.r.right))+","+(loc[1]+Math.round(back.r.bottom)));
+                if(ctrl!=null) android.util.Log.i("REVA_TOUCH","CTRLRECT:"+(loc[0]+Math.round(ctrl.r.left))+","+(loc[1]+Math.round(ctrl.r.top))+","+(loc[0]+Math.round(ctrl.r.right))+","+(loc[1]+Math.round(ctrl.r.bottom)));
+                if(bex!=null) android.util.Log.i("REVA_TOUCH","BEXRECT:"+(loc[0]+Math.round(bex.r.left))+","+(loc[1]+Math.round(bex.r.top))+","+(loc[0]+Math.round(bex.r.right))+","+(loc[1]+Math.round(bex.r.bottom)));
+''')
+
 # ---------------------------------------------------------------------------
 # 2) Swap only layout metadata. Do not alter v1.9 pointer ownership, pulse
 #    timing, haptics, drawing feedback, or the twelve-key skill painter.
@@ -66,6 +75,7 @@ for required in [
     'case KeyEvent.KEYCODE_CTRL_LEFT: return new String[]{"Control","ControlLeft","1"}',
     "['b','KeyB',0]",
     "['Control','ControlLeft',1]",
+    'CTRLRECT:','BEXRECT:',
     'LAYOUT:MODERN_V110',
     'ROLE_JOYSTICK','ROLE_BUTTON','ROLE_GAME',
     'dispatchDomKey(','forceDomReleaseAll(',
