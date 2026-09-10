@@ -11,6 +11,17 @@ def once(old,new):
         raise SystemExit('v1.10 smoke missing needle: '+old[:180].replace('\n','\\n'))
     s=s.replace(old,new,1)
 
+# The inherited v1.7 visual regression helper imports Pillow. Hosted runner
+# images do not guarantee PIL is preinstalled, so make the generated smoke
+# harness self-contained instead of letting a missing QA dependency look like
+# an application regression.
+once('''#!/usr/bin/env bash\nset -euo pipefail\n''','''#!/usr/bin/env bash
+set -euo pipefail
+if ! python3 -c 'import PIL' >/dev/null 2>&1; then
+  python3 -m pip install --quiet pillow
+fi
+''')
+
 # XRECT is a suffix of BEXRECT. The old substring grep plus tail -1 therefore
 # returned the later BEXRECT line when asking for XRECT, making the legacy X
 # hold regression physically press B. Match the REVA_TOUCH field token exactly.
@@ -70,7 +81,7 @@ echo 'FINAL_LAYOUT PASS' | tee -a "$OUT_DIR/final-layout-logcat.txt"
 '''
 once(marker,insert)
 
-if 'EX_CTRL PASS' not in s or 'EX_B PASS' not in s or 'FINAL_LAYOUT PASS' not in s or "CTRLRECT=" not in s or 'REVA_TOUCH: $1' not in s:
+if 'EX_CTRL PASS' not in s or 'EX_B PASS' not in s or 'FINAL_LAYOUT PASS' not in s or "CTRLRECT=" not in s or 'REVA_TOUCH: $1' not in s or "import PIL" not in s:
     raise SystemExit('v1.10 EX smoke insertion failed')
 p.write_text(s)
-print('PASS fix_smoke_v110: exact layout fields + Ctrl/B regression + final layout evidence; render QA is stdlib-only')
+print('PASS fix_smoke_v110: exact layout fields + Ctrl/B regression + final layout evidence + Pillow render dependency')
