@@ -1,0 +1,162 @@
+name: Trace 3.0 EX Skill Handler UI Links
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/trace-skill-ui-links.yml'
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Download pinned SWF and FFDec
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          python3 - <<'PY'
+          import urllib.request,hashlib
+          u='https://www.mhhf.com/files/game/4711/lbmxex.swf'
+          q=urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0','Referer':'https://www.mhhf.com/'})
+          b=urllib.request.urlopen(q,timeout=120).read()
+          assert len(b)==17628685
+          assert hashlib.sha256(b).hexdigest()=='0c7904469438078919c705dc7d0da11a9e0595fce29decd68f84599b25d3f457'
+          open('/tmp/game.swf','wb').write(b)
+          PY
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/ffdec.zip 'https://github.com/jindrapetrik/jpexs-decompiler/releases/download/version26.2.1/ffdec_26.2.1.zip'
+          echo '0333b56998a55bd83f4e0deb678a811fcdc45607582b4f5dd438309c8c3ad5ce  /tmp/ffdec.zip' | sha256sum -c -
+          mkdir -p /tmp/ffdec && unzip -q /tmp/ffdec.zip -d /tmp/ffdec
+
+      - name: Dump complete SWF tag structure
+        run: |
+          set -euo pipefail
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -dumpSWF /tmp/game.swf > /tmp/dump.txt 2>&1
+          test -s /tmp/dump.txt
+          echo "DUMP_LINES=$(wc -l < /tmp/dump.txt)" | tee report/dump-summary.txt
+
+      - name: Extract handler placements and parent contexts
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,json
+          lines=Path('/tmp/dump.txt').read_text(errors='ignore').splitlines()
+          ids=[4054,4056,4060,4064,4066,4068,4070,4072,4074,4076,4078,4083,4088,4092,4103,4110,
+               4121,4123,4125,4128,4130,4133,4136,4138,4140,4147,4149,4151,4155,4165,4172,
+               4176,4178,4182,4185,4189,4191,4193,4197,4200,4206,4209,4213,4221,4227,
+               4234,4242,4246,4251,4255,4259,4263,4266,4272,4276,4283,4288]
+          wanted=set(ids)
+          # Keep wide contexts around every exact handler definition/placement.
+          hit_indices=[]
+          rx=re.compile(r'\b(?:DefineSprite \(chid:|PlaceObject2? \(chid:)\s*('+'|'.join(map(str,ids))+r')\b')
+          for i,line in enumerate(lines):
+              if rx.search(line): hit_indices.append(i)
+          keep=set()
+          for i in hit_indices:
+              keep.update(range(max(0,i-35),min(len(lines),i+36)))
+          out=[]; last=-2
+          for i in sorted(keep):
+              if i>last+1: out.append('\n===== CONTEXT BREAK =====\n')
+              out.append(f'{i+1:07d}: {lines[i]}')
+              last=i
+          Path('report/handler-placement-contexts.txt').write_text('\n'.join(out),errors='ignore')
+
+          # A compact exact-hit table makes it easy to inspect which handlers are
+          # ever placed by a parent timeline and at which depth.
+          hits=[]
+          for i,line in enumerate(lines):
+              m=re.search(r'PlaceObject2? \(chid:\s*(\d+), dpt:\s*(\d+)',line)
+              if m and int(m.group(1)) in wanted:
+                  hits.append({'line':i+1,'handlerId':int(m.group(1)),'depth':int(m.group(2)),'text':line.strip()})
+          Path('report/handler-placement-hits.json').write_text(json.dumps(hits,indent=2))
+          with Path('report/handler-placement-hits.tsv').open('w') as f:
+              f.write('handlerId\tdepth\tline\ttext\n')
+              for h in hits: f.write(f"{h['handlerId']}\t{h['depth']}\t{h['line']}\t{h['text']}\n")
+          counts={sid:0 for sid in ids}
+          for h in hits: counts[h['handlerId']]+=1
+          Path('report/handler-placement-counts.tsv').write_text('handlerId\tplacements\n'+''.join(f'{k}\t{v}\n' for k,v in counts.items()))
+          print('EXACT_HANDLER_PLACEMENTS',len(hits),'HANDLERS_WITH_PARENT',sum(v>0 for v in counts.values()))
+          PY
+
+      - name: Export broad nearby sprite visuals for sibling matching
+        run: |
+          set -euo pipefail
+          # The four skill-controller ranges are tightly packed. Export frame 1
+          # for every sprite in and immediately around those ranges; later we can
+          # compare visual siblings against the exact handler placement contexts.
+          python3 - <<'PY'
+          from pathlib import Path
+          ids=[]
+          for lo,hi in [(4035,4118),(4119,4175),(4176,4229),(4230,4292)]: ids += list(range(lo,hi+1))
+          Path('/tmp/ids.txt').write_text(','.join(map(str,ids)))
+          Path('/tmp/frames.txt').write_text(','.join(f'{x}:1' for x in ids))
+          PY
+          mkdir -p /tmp/nearby report/nearby
+          set +e
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -onerror ignore \
+            -selectid "$(cat /tmp/ids.txt)" -select "$(cat /tmp/frames.txt)" \
+            -format sprite:png -export sprite /tmp/nearby /tmp/game.swf 2>&1 | tee report/nearby-export.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "NEARBY_EXPORT_EXIT=$rc" > report/nearby-export-status.txt
+          find /tmp/nearby -type f | sort > report/nearby-files.txt
+          echo "NEARBY_FILES=$(wc -l < report/nearby-files.txt)" >> report/nearby-export-status.txt
+          cp -a /tmp/nearby/. report/nearby/ || true
+          test "$rc" -eq 0
+
+      - name: Build nearby visual contact sheets
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet pillow
+          mkdir -p report/sheets
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image,ImageDraw,ImageFont
+          import re,math,json
+          root=Path('report/nearby'); imgs=[]
+          for p in sorted(root.rglob('*.png')):
+              try:
+                  im=Image.open(p).convert('RGBA'); w,h=im.size
+                  alpha=im.getchannel('A'); bbox=alpha.getbbox(); visible=0 if bbox is None else sum(1 for v in alpha.getdata() if v>8)
+                  m=re.search(r'DefineSprite_(\d+)',str(p)); sid=int(m.group(1)) if m else -1
+                  imgs.append((p,w,h,sid,visible))
+              except Exception: pass
+          Path('report/nearby-dimensions.json').write_text(json.dumps([{'spriteId':sid,'w':w,'h':h,'visiblePixels':v,'file':str(p.relative_to(root))} for p,w,h,sid,v in imgs],indent=2))
+          cell=145; cols=7; per=49; font=ImageFont.load_default()
+          for page,start in enumerate(range(0,len(imgs),per),1):
+              part=imgs[start:start+per]; rr=math.ceil(len(part)/cols)
+              sh=Image.new('RGB',(cols*cell,rr*cell),(28,28,28)); d=ImageDraw.Draw(sh)
+              for j,(p,w,h,sid,v) in enumerate(part):
+                  r=j//cols; c=j%cols; x0=c*cell; y0=r*cell
+                  im=Image.open(p).convert('RGBA'); im.thumbnail((105,100),Image.Resampling.LANCZOS)
+                  bg=Image.new('RGBA',(109,104),(235,235,235,255)); bg.alpha_composite(im,((109-im.width)//2,(104-im.height)//2))
+                  sh.paste(bg.convert('RGB'),(x0+18,y0+4))
+                  d.text((x0+4,y0+112),f'id {sid} {w}x{h}',fill='white',font=font)
+                  d.text((x0+4,y0+125),f'px {v}',fill=(190,190,190),font=font)
+              sh.save(Path('report/sheets')/f'nearby-{page:02d}.png')
+          print('NEARBY_IMAGES',len(imgs))
+          PY
+
+      - name: Validate and upload
+        run: |
+          set -euo pipefail
+          test -s report/handler-placement-contexts.txt
+          test -s report/handler-placement-hits.tsv
+          test -s report/nearby-dimensions.json
+          grep -q 'NEARBY_EXPORT_EXIT=0' report/nearby-export-status.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reva-3.0ex-skill-ui-links
+          if-no-files-found: warn
+          path: report/**
