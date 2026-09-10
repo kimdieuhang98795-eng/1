@@ -56,10 +56,21 @@ grep -q 'DOM_UP:KeyB:b' "$OUT_DIR/ex-b-logcat.txt"
 grep -q 'PRESS:B' "$OUT_DIR/ex-b-logcat.txt"
 grep -q 'RELEASE:B' "$OUT_DIR/ex-b-logcat.txt"
 echo 'EX_B PASS' | tee -a "$OUT_DIR/ex-b-logcat.txt"
+
+# The parent workflow checks the final device log for LAYOUT:MODERN_V110.
+# Individual input regressions intentionally clear logcat, so finish with a
+# fresh real app launch and verify that the layout marker is emitted again.
+adb logcat -c
+adb shell am force-stop "$PKG" || true
+adb shell am start -W -n "$ACTIVITY" --ez qa_input true > "$OUT_DIR/am-final-layout.txt"
+sleep 2
+adb logcat -d -s REVA_TOUCH:I > "$OUT_DIR/final-layout-logcat.txt" || true
+grep -q 'LAYOUT:MODERN_V110' "$OUT_DIR/final-layout-logcat.txt"
+echo 'FINAL_LAYOUT PASS' | tee -a "$OUT_DIR/final-layout-logcat.txt"
 '''
 once(marker,insert)
 
-if 'EX_CTRL PASS' not in s or 'EX_B PASS' not in s or "CTRLRECT=" not in s or 'REVA_TOUCH: $1' not in s:
+if 'EX_CTRL PASS' not in s or 'EX_B PASS' not in s or 'FINAL_LAYOUT PASS' not in s or "CTRLRECT=" not in s or 'REVA_TOUCH: $1' not in s:
     raise SystemExit('v1.10 EX smoke insertion failed')
 p.write_text(s)
-print('PASS fix_smoke_v110: exact layout fields + device-level Ctrl/B hold + DOM down/up regression')
+print('PASS fix_smoke_v110: exact layout fields + Ctrl/B regression + final layout evidence')
