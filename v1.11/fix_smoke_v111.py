@@ -11,12 +11,19 @@ def once(old,new):
         raise SystemExit('v1.11 smoke missing needle: '+old[:200].replace('\n','\\n'))
     s=s.replace(old,new,1)
 
+# Extend the v1.10 layout-field parsing with the presentation-only profile selector.
 once('''CTRLRECT="$(get_field 'CTRLRECT:')"; BEXRECT="$(get_field 'BEXRECT:')"\n[[ -n "$XRECT" && -n "$ARECT" && -n "$BACKRECT" && -n "$JOY" && -n "$CTRLRECT" && -n "$BEXRECT" ]]\n''','''CTRLRECT="$(get_field 'CTRLRECT:')"; BEXRECT="$(get_field 'BEXRECT:')"; PROFILERECT="$(get_field 'PROFILERECT:')"
 [[ -n "$XRECT" && -n "$ARECT" && -n "$BACKRECT" && -n "$JOY" && -n "$CTRLRECT" && -n "$BEXRECT" && -n "$PROFILERECT" ]]
 ''')
 
-once('''read CTRL_X CTRL_Y < <(center "$CTRLRECT"); read BEX_X BEX_Y < <(center "$BEXRECT")\nprintf 'PARSED_RECTS X=%s,%s A=%s,%s BACK=%s,%s CTRL=%s,%s BEX=%s,%s JOY=%s,%s,%s\\n' "$X_X" "$X_Y" "$A_X" "$A_Y" "$B_X" "$B_Y" "$CTRL_X" "$CTRL_Y" "$BEX_X" "$BEX_Y" "$J_X" "$J_Y" "$J_R" | tee "$OUT_DIR/parsed-rects.txt"\n''','''read CTRL_X CTRL_Y < <(center "$CTRLRECT"); read BEX_X BEX_Y < <(center "$BEXRECT"); read PROFILE_X PROFILE_Y < <(center "$PROFILERECT")
-printf 'PARSED_RECTS X=%s,%s A=%s,%s BACK=%s,%s CTRL=%s,%s BEX=%s,%s PROFILE=%s,%s JOY=%s,%s,%s\n' "$X_X" "$X_Y" "$A_X" "$A_Y" "$B_X" "$B_Y" "$CTRL_X" "$CTRL_Y" "$BEX_X" "$BEX_Y" "$PROFILE_X" "$PROFILE_Y" "$J_X" "$J_Y" "$J_R" | tee "$OUT_DIR/parsed-rects.txt"
+# Do not anchor to the whole PARSED_RECTS printf: inherited smoke formatting has
+# changed several times. Only extend the stable coordinate-read statement.
+once('''read CTRL_X CTRL_Y < <(center "$CTRLRECT"); read BEX_X BEX_Y < <(center "$BEXRECT")''','''read CTRL_X CTRL_Y < <(center "$CTRLRECT"); read BEX_X BEX_Y < <(center "$BEXRECT"); read PROFILE_X PROFILE_Y < <(center "$PROFILERECT")''')
+
+# Keep explicit evidence of the resolved selector target without altering the
+# inherited PARSED_RECTS contract consumed by older regression checks.
+once('''[[ "$X_X" -ne "$BEX_X" || "$X_Y" -ne "$BEX_Y" ]]\n''','''[[ "$X_X" -ne "$BEX_X" || "$X_Y" -ne "$BEX_Y" ]]
+printf 'PROFILE_RECT center=%s,%s raw=%s\\n' "$PROFILE_X" "$PROFILE_Y" "$PROFILERECT" | tee -a "$OUT_DIR/parsed-rects.txt"
 ''')
 
 # Insert selector regression immediately before v1.10's final fresh-layout launch.
@@ -36,9 +43,9 @@ once(marker,insert)
 # v1.11 advances the runtime marker everywhere in the final-layout smoke block.
 s=s.replace('LAYOUT:MODERN_V110','LAYOUT:MODERN_V111')
 
-for token in ['PROFILERECT=','PROFILE_X','PROFILE_SWITCH PASS','PROFILE:Ranger:漫游','LAYOUT:MODERN_V111']:
+for token in ['PROFILERECT=','PROFILE_X','PROFILE_SWITCH PASS','PROFILE:Ranger:漫游','LAYOUT:MODERN_V111','PROFILE_RECT center=']:
     if token not in s: raise SystemExit('v1.11 smoke insertion failed: '+token)
 if 'LAYOUT:MODERN_V110' in s:
     raise SystemExit('v1.11 stale V110 marker in smoke')
 p.write_text(s)
-print('PASS fix_smoke_v111: profession selector tap + zero-keydown leak + V111 final marker')
+print('PASS fix_smoke_v111: robust profile selector tap + zero-keydown leak + V111 final marker')
