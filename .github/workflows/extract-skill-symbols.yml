@@ -58,12 +58,12 @@ jobs:
           echo "SCRIPT_FILES=$(wc -l < skill-symbol-report/script-files.txt)"
           cp -a /tmp/scripts/. skill-symbol-report/scripts/
 
-      - name: Build key mapping grep report
+      - name: Build key and handler-sprite reports
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import re
+          import re,json
           root=Path('/tmp/scripts')
           pats=[
             r'Key\.isDown',r'Key\.',r'keyCode',r'charCode',r'onKeyDown',r'onKeyUp',
@@ -88,6 +88,83 @@ jobs:
           Path('skill-symbol-report/key-mapping-hits.txt').write_text('\n'.join(out),errors='ignore')
           Path('skill-symbol-report/key-mapping-summary.txt').write_text(f'KEY_HIT_BLOCKS={len(out)}\n')
           print('KEY_HIT_BLOCKS',len(out))
+
+          # The four main professions occupy stable controller-sprite ranges in
+          # the pinned 3.0EX SWF. Associate browser-facing keys with the exact
+          # DefineSprite that polls them, so visual extraction can be targeted
+          # instead of guessed from thousands of unrelated small assets.
+          keycodes=[
+            (65,'A'),(83,'S'),(68,'D'),(70,'F'),(71,'G'),(72,'H'),
+            (81,'Q'),(87,'W'),(69,'E'),(82,'R'),(84,'T'),(89,'Y'),
+            (16,'SHIFT'),(66,'B'),(17,'CTRL'),(32,'SPACE')
+          ]
+          classes={
+            'Spitfire':(4050,4111),
+            'Ranger':(4120,4173),
+            'Berserker':(4174,4228),
+            'WeaponMaster':(4230,4289),
+          }
+          rows=[]
+          for p in root.rglob('*.as'):
+            rel=str(p.relative_to(root))
+            m=re.match(r'DefineSprite_(\d+)',rel)
+            if not m:
+              continue
+            sid=int(m.group(1))
+            cls=next((name for name,(lo,hi) in classes.items() if lo<=sid<=hi),None)
+            if not cls:
+              continue
+            text=p.read_text(errors='ignore')
+            for code,key in keycodes:
+              if re.search(rf'Key\.isDown\({code}\)',text):
+                rows.append({'class':cls,'key':key,'keyCode':code,'spriteId':sid,'script':rel})
+          rows=sorted(rows,key=lambda x:(list(classes).index(x['class']),x['key'],x['spriteId'],x['script']))
+          Path('skill-symbol-report/skill-handler-map.json').write_text(json.dumps(rows,indent=2,ensure_ascii=False))
+          with Path('skill-symbol-report/skill-handler-map.tsv').open('w') as f:
+            f.write('class\tkey\tkeyCode\tspriteId\tscript\n')
+            for r in rows:
+              f.write(f"{r['class']}\t{r['key']}\t{r['keyCode']}\t{r['spriteId']}\t{r['script']}\n")
+          unique=sorted({r['spriteId'] for r in rows})
+          Path('skill-symbol-report/skill-handler-sprite-ids.txt').write_text(','.join(map(str,unique))+'\n')
+          Path('skill-symbol-report/skill-handler-frame-selection.txt').write_text(','.join(f'{x}:1' for x in unique)+'\n')
+          print('PROVEN_HANDLER_ROWS',len(rows),'UNIQUE_HANDLER_SPRITES',len(unique))
+          PY
+
+      - name: Dump targeted SWF tag references
+        run: |
+          set -u
+          set +e
+          java -Djava.awt.headless=true -jar /tmp/ffdec/ffdec.jar -dumpSWF /tmp/game.swf > /tmp/swf-tag-dump.txt 2>&1
+          rc=$?
+          set -e
+          echo "dumpSWF_exit=$rc" > skill-symbol-report/dump-status.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          src=Path('/tmp/swf-tag-dump.txt')
+          if not src.exists():
+            raise SystemExit(0)
+          lines=src.read_text(errors='ignore').splitlines()
+          ids=set()
+          try:
+            ids.update(int(x) for x in Path('skill-symbol-report/skill-handler-sprite-ids.txt').read_text().strip().split(',') if x)
+          except Exception:
+            pass
+          ids.update([1574,8893,8894,8895])
+          rx=re.compile(r'(?<!\d)('+'|'.join(map(str,sorted(ids)))+r')(?!\d)') if ids else re.compile(r'$^')
+          keep=set()
+          for i,line in enumerate(lines):
+            if rx.search(line):
+              keep.update(range(max(0,i-4),min(len(lines),i+5)))
+          out=[]
+          last=-2
+          for i in sorted(keep):
+            if i>last+1:
+              out.append('\n---\n')
+            out.append(f'{i+1:07d}: {lines[i]}')
+            last=i
+          Path('skill-symbol-report/targeted-swf-tag-references.txt').write_text('\n'.join(out),errors='ignore')
+          print('TARGETED_DUMP_LINES',len(out))
           PY
 
       - name: Export visual symbol sources
@@ -110,7 +187,12 @@ jobs:
           }
 
           set -e
-          run_export sprite /tmp/sprites -onerror ignore -select 'all:1' -format sprite:png -export sprite /tmp/sprites /tmp/game.swf
+          # FFDec 26.2.1 throws an NPE for the previous generic `all:1`
+          # selection. Use the exact numeric character IDs proven by AS2 key
+          # polling and ask only for frame 1 of those sprites.
+          SKILL_IDS="$(cat skill-symbol-report/skill-handler-sprite-ids.txt)"
+          SKILL_FRAMES="$(cat skill-symbol-report/skill-handler-frame-selection.txt)"
+          run_export sprite /tmp/sprites -onerror ignore -selectid "$SKILL_IDS" -select "$SKILL_FRAMES" -format sprite:png -export sprite /tmp/sprites /tmp/game.swf
           run_export button /tmp/buttons -onerror ignore -format button:png -export button /tmp/buttons /tmp/game.swf
           run_export image /tmp/images -onerror ignore -format image:png -export image /tmp/images /tmp/game.swf
 
@@ -209,13 +291,17 @@ jobs:
         run: |
           set -euo pipefail
           test -s skill-symbol-report/key-mapping-hits.txt
+          test -s skill-symbol-report/skill-handler-map.json
           test -s skill-symbol-report/symbol-manifest.json
           python3 - <<'PY'
           import json
           from pathlib import Path
-          p=Path('skill-symbol-report/symbol-manifest.json')
-          data=json.loads(p.read_text())
+          data=json.loads(Path('skill-symbol-report/symbol-manifest.json').read_text())
+          handlers=json.loads(Path('skill-symbol-report/skill-handler-map.json').read_text())
           print('validated_symbol_candidates',len(data))
+          print('validated_handler_rows',len(handlers))
           if not data:
             raise SystemExit('No visual symbol candidates were produced; inspect uploaded FFDec logs.')
+          if not handlers:
+            raise SystemExit('No class/key handler sprites were proven from ActionScript.')
           PY
