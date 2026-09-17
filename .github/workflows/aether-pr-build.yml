@@ -69,9 +69,9 @@ jobs:
           zip -j out/AETHER-unsigned.apk out/dex/classes.dex
           "$BT/zipalign" -f -p 4 out/AETHER-unsigned.apk out/AETHER-aligned.apk
 
-          keytool -genkeypair             -keystore out/debug.keystore             -storepass android             -keypass android             -alias aether             -dname "CN=AETHER,O=NOEMA Prototype,C=SG"             -keyalg RSA             -keysize 2048             -validity 10000
+          base64 -d signing/aether-prototype.keystore.b64 > out/aether-prototype.keystore
 
-          "$BT/apksigner" sign             --ks out/debug.keystore             --ks-key-alias aether             --ks-pass pass:android             --key-pass pass:android             --out out/AETHER-debug.apk             out/AETHER-aligned.apk
+          "$BT/apksigner" sign             --ks out/aether-prototype.keystore             --ks-key-alias aether             --ks-pass pass:aetherdev2026             --key-pass pass:aetherdev2026             --out out/AETHER-debug.apk             out/AETHER-aligned.apk
 
           "$BT/apksigner" verify --verbose out/AETHER-debug.apk
           "$BT/aapt2" dump badging out/AETHER-debug.apk | head -40
