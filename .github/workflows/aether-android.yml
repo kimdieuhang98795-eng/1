@@ -17,9 +17,6 @@ permissions:
 jobs:
   native-apk:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: aether-native
 
     steps:
       - name: Checkout
@@ -33,13 +30,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Prepare Android SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager)"; fi
+          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
 
-      - name: Install Android platform and build tools
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-
-      - name: Compile Android framework app
+      - name: Build debug APK
+        working-directory: aether-native
         shell: bash
         run: |
           set -euxo pipefail
@@ -51,10 +51,9 @@ jobs:
           javac -source 8 -target 8 -encoding UTF-8             -classpath "$ANDROID_JAR"             -d out/classes             src/com/aether/noema/MainActivity.java
 
           mapfile -t CLASS_FILES < <(find out/classes -name '*.class' -print)
-          "$BT/d8"             --lib "$ANDROID_JAR"             --min-api 26             --output out/dex             "${CLASS_FILES[@]}"
+          "$BT/d8" --lib "$ANDROID_JAR" --min-api 26 --output out/dex "${CLASS_FILES[@]}"
 
-          "$BT/aapt2" compile             --dir res             -o out/resources.zip
-
+          "$BT/aapt2" compile --dir res -o out/resources.zip
           "$BT/aapt2" link             -o out/AETHER-unsigned.apk             -I "$ANDROID_JAR"             --manifest AndroidManifest.xml             -R out/resources.zip             --min-sdk-version 26             --target-sdk-version 35             --version-code 2             --version-name 0.2.0
 
           zip -j out/AETHER-unsigned.apk out/dex/classes.dex
@@ -63,9 +62,7 @@ jobs:
           keytool -genkeypair             -keystore out/debug.keystore             -storepass android             -keypass android             -alias aether             -dname "CN=AETHER,O=NOEMA Prototype,C=SG"             -keyalg RSA             -keysize 2048             -validity 10000
 
           "$BT/apksigner" sign             --ks out/debug.keystore             --ks-key-alias aether             --ks-pass pass:android             --key-pass pass:android             --out out/AETHER-debug.apk             out/AETHER-aligned.apk
-
           "$BT/apksigner" verify --verbose out/AETHER-debug.apk
-          "$BT/aapt2" dump badging out/AETHER-debug.apk | head -40
 
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
@@ -76,7 +73,6 @@ jobs:
 
       - name: Publish APK back to branch
         shell: bash
-        working-directory: .
         run: |
           set -euxo pipefail
           mkdir -p aether-native/releases
