@@ -279,10 +279,14 @@ public class MainActivity extends Activity implements SensorEventListener {
             "\n" +
             "  vec2 center=vec2(uTilt.x*.018+uDrag.x*.055, uTilt.y*.012+uDrag.y*.038);\n" +
             "  vec2 q=p-center;\n" +
-            "  float ang=uDrag.x*.42+uTilt.x*.10+uVelocity.x*.018;\n" +
+            "  float releaseKick=sin(clamp(uRelease,0.0,1.0)*3.14159265)*(1.0-.28*uRelease)*uEnergy;\n" +
+            "  float side=sign(q.x+1e-5);\n" +
+            "  q.x-=side*releaseKick*.045;\n" +
+            "  q.y+=side*releaseKick*.012*sin(q.y*12.0);\n" +
+            "  float ang=uDrag.x*.42+uTilt.x*.10+uVelocity.x*.018+side*releaseKick*.075;\n" +
             "  q=rot(ang)*q;\n" +
-            "  q.y*=1.0+uPress*.035;\n" +
-            "  q.x*=1.0-uPress*.018;\n" +
+            "  q.y*=1.0+uPress*.060+uEnergy*.022;\n" +
+            "  q.x*=1.0-uPress*.026-uEnergy*.014;\n" +
             "\n" +
             "  float body=sdRoundBox(q,vec2(.235,.335),.105);\n" +
             "  float shell=1.0-smoothstep(-.010,.010,body);\n" +
@@ -319,6 +323,8 @@ public class MainActivity extends Activity implements SensorEventListener {
             "  float slitMask=(1.0-smoothstep(.15,.78,abs(lp.y)))*lens;\n" +
             "  float chargeLight=slit*slitMask*(.08+uEnergy*1.65);\n" +
             "  glass+=chargeLight*vec3(1.0,.72,.36);\n" +
+            "  float fracture=exp(-abs(q.x)*mix(145.0,38.0,releaseKick))*releaseKick*lens;\n" +
+            "  glass+=fracture*vec3(1.0,.78,.48)*1.35;\n" +
             "\n" +
             "  vec3 object=mix(metal,glass,lens*.92);\n" +
             "  object+=rim*vec3(.30,.29,.255)*(.34+.22*spec);\n" +
