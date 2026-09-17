@@ -20,3 +20,5 @@ This pass focuses on perceived material quality rather than feature count.
 - adaptive AETHER launcher icon
 - Android 12+ system splash matched to the custom cinematic boot
 - no internet permission, analytics, ads, or third-party runtime dependencies
+
+Build target: Android API 35, minSdk 26, framework-only runtime.
