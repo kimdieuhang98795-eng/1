@@ -30,13 +30,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Prepare Android SDK
+      - name: Verify Android SDK
         shell: bash
         run: |
           set -euxo pipefail
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager)"; fi
-          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+          ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          if [ ! -f "$ANDROID_JAR" ] || [ ! -x "$BT/aapt2" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME" -type f -name sdkmanager -perm -111 2>/dev/null | sort | tail -n 1 || true)"
+            test -n "$SDKMANAGER"
+            "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+          fi
+          test -f "$ANDROID_JAR"
+          test -x "$BT/aapt2"
 
       - name: Build debug APK
         working-directory: aether-native
@@ -48,20 +54,18 @@ jobs:
           ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
           BT="$ANDROID_HOME/build-tools/35.0.0"
 
-          javac -source 8 -target 8 -encoding UTF-8             -classpath "$ANDROID_JAR"             -d out/classes             src/com/aether/noema/MainActivity.java
-
+          javac -source 8 -target 8 -encoding UTF-8 -classpath "$ANDROID_JAR" -d out/classes src/com/aether/noema/MainActivity.java
           mapfile -t CLASS_FILES < <(find out/classes -name '*.class' -print)
           "$BT/d8" --lib "$ANDROID_JAR" --min-api 26 --output out/dex "${CLASS_FILES[@]}"
 
           "$BT/aapt2" compile --dir res -o out/resources.zip
-          "$BT/aapt2" link             -o out/AETHER-unsigned.apk             -I "$ANDROID_JAR"             --manifest AndroidManifest.xml             -R out/resources.zip             --min-sdk-version 26             --target-sdk-version 35             --version-code 2             --version-name 0.2.0
+          "$BT/aapt2" link -o out/AETHER-unsigned.apk -I "$ANDROID_JAR" --manifest AndroidManifest.xml -R out/resources.zip --auto-add-overlay --min-sdk-version 26 --target-sdk-version 35 --version-code 2 --version-name 0.2.0
 
           zip -j out/AETHER-unsigned.apk out/dex/classes.dex
           "$BT/zipalign" -f -p 4 out/AETHER-unsigned.apk out/AETHER-aligned.apk
 
-          keytool -genkeypair             -keystore out/debug.keystore             -storepass android             -keypass android             -alias aether             -dname "CN=AETHER,O=NOEMA Prototype,C=SG"             -keyalg RSA             -keysize 2048             -validity 10000
-
-          "$BT/apksigner" sign             --ks out/debug.keystore             --ks-key-alias aether             --ks-pass pass:android             --key-pass pass:android             --out out/AETHER-debug.apk             out/AETHER-aligned.apk
+          keytool -genkeypair -keystore out/debug.keystore -storepass android -keypass android -alias aether -dname "CN=AETHER,O=NOEMA Prototype,C=SG" -keyalg RSA -keysize 2048 -validity 10000
+          "$BT/apksigner" sign --ks out/debug.keystore --ks-key-alias aether --ks-pass pass:android --key-pass pass:android --out out/AETHER-debug.apk out/AETHER-aligned.apk
           "$BT/apksigner" verify --verbose out/AETHER-debug.apk
 
       - name: Upload installable APK
@@ -76,9 +80,9 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p aether-native/releases
-          cp aether-native/out/AETHER-debug.apk aether-native/releases/AETHER-debug.apk
+          cp aether-native/out/AETHER-debug.apk aether-native/releases/AETHER-NOEMA-v0.2.apk
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add aether-native/releases/AETHER-debug.apk
+          git add aether-native/releases/AETHER-NOEMA-v0.2.apk
           git commit -m "AETHER v0.2: publish installable APK [skip ci]" || exit 0
           git push origin HEAD:aether-android-showcase
