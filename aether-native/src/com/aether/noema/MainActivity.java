@@ -156,6 +156,24 @@ public class MainActivity extends Activity implements SensorEventListener {
                 thresholdOne = thresholdTwo = false;
                 renderer.onDown(x / Math.max(1f,getWidth()), 1f - y / Math.max(1f,getHeight()));
                 activity.tactileTick(42);
+
+                final long stamp = downAt;
+                postDelayed(new Runnable() {
+                    @Override public void run() {
+                        if (renderer.pressed && downAt == stamp && !thresholdOne) {
+                            thresholdOne = true;
+                            activity.tactileTick(62);
+                        }
+                    }
+                }, 440);
+                postDelayed(new Runnable() {
+                    @Override public void run() {
+                        if (renderer.pressed && downAt == stamp && !thresholdTwo) {
+                            thresholdTwo = true;
+                            activity.tactileTick(108);
+                        }
+                    }
+                }, 900);
                 return true;
             }
 
@@ -237,9 +255,9 @@ public class MainActivity extends Activity implements SensorEventListener {
             "uniform float uRelease;\n" +
             "uniform vec2 uVelocity;\n" +
             "\n" +
-            "float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }\n" +
+            "float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=vec2(dot(p,p+vec2(45.32))); return fract(p.x*p.y); }\n" +
             "float noise(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(hash21(i),hash21(i+vec2(1,0)),f.x),mix(hash21(i+vec2(0,1)),hash21(i+vec2(1,1)),f.x),f.y); }\n" +
-            "float fbm(vec2 p){ float s=0.0,a=.5; mat2 m=mat2(1.63,-1.17,1.17,1.63); for(int i=0;i<4;i++){s+=a*noise(p);p=m*p+3.1;a*=.48;} return s; }\n" +
+            "float fbm(vec2 p){ float s=0.0,a=.5; mat2 m=mat2(1.63,-1.17,1.17,1.63); for(int i=0;i<4;i++){s+=a*noise(p);p=m*p+vec2(3.1);a*=.48;} return s; }\n" +
             "mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}\n" +
             "float sdRoundBox(vec2 p, vec2 b, float r){vec2 q=abs(p)-b+r;return min(max(q.x,q.y),0.0)+length(max(q,0.0))-r;}\n" +
             "float band(float d,float w){return exp(-abs(d)/w);}\n" +
@@ -320,7 +338,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             "  col*=1.0-blackout*.14;\n" +
             "\n" +
             "  // Tiny material grain; not stars or HUD particles.\n" +
-            "  float grain=hash21(frag+floor(uTime*60.0));\n" +
+            "  float grain=hash21(frag+vec2(floor(uTime*60.0)));\n" +
             "  col+=(grain-.5)*.018;\n" +
             "  col*=mix(.12,1.0,boot);\n" +
             "  col*=.72+.28*vig;\n" +
