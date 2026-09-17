@@ -64,7 +64,7 @@ jobs:
 
           "$BT/aapt2" compile             --dir res             -o out/resources.zip
 
-          "$BT/aapt2" link             -o out/AETHER-unsigned.apk             -I "$ANDROID_JAR"             --manifest AndroidManifest.xml             -R out/resources.zip             --min-sdk-version 26             --target-sdk-version 35             --version-code 2             --version-name 0.2.0
+          "$BT/aapt2" link             -o out/AETHER-unsigned.apk             -I "$ANDROID_JAR"             --manifest AndroidManifest.xml             -R out/resources.zip             --auto-add-overlay             --min-sdk-version 26             --target-sdk-version 35             --version-code 2             --version-name 0.2.0
 
           zip -j out/AETHER-unsigned.apk out/dex/classes.dex
           "$BT/zipalign" -f -p 4 out/AETHER-unsigned.apk out/AETHER-aligned.apk
