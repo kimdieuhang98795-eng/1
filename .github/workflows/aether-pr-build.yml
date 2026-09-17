@@ -24,16 +24,28 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Prepare Android SDK
+      - name: Verify Android SDK
         shell: bash
         run: |
           set -euxo pipefail
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$(command -v sdkmanager)"
+          ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+
+          if [ ! -f "$ANDROID_JAR" ] || [ ! -x "$BT/aapt2" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME" -type f -name sdkmanager -perm -111 2>/dev/null | sort | tail -n 1 || true)"
+            if [ -z "$SDKMANAGER" ]; then
+              echo "Installed Android SDK packages:"
+              find "$ANDROID_HOME/platforms" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort || true
+              find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort || true
+              exit 1
+            fi
+            "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
           fi
-          "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
+
+          test -f "$ANDROID_JAR"
+          test -x "$BT/aapt2"
+          echo "Using $ANDROID_JAR"
+          echo "Using $BT"
 
       - name: Build zero-dependency APK
         working-directory: aether-native
