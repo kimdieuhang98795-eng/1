@@ -5,16 +5,16 @@ on:
     branches:
       - aether-android-showcase
     paths:
-      - 'aether-android/**'
+      - 'aether-native/**'
       - '.github/workflows/aether-android.yml'
   workflow_dispatch:
 
 jobs:
-  build:
+  native-apk:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: aether-android
+        working-directory: aether-native
 
     steps:
       - name: Checkout
@@ -29,20 +29,37 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android platform
+      - name: Install Android platform and build tools
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
+      - name: Compile Android framework app
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf out
+          mkdir -p out/classes out/dex
+          ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
+          BT="$ANDROID_HOME/build-tools/35.0.0"
 
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+          javac -source 8 -target 8 -encoding UTF-8             -classpath "$ANDROID_JAR"             -d out/classes             src/com/aether/noema/MainActivity.java
 
-      - name: Upload APK
+          mapfile -t CLASS_FILES < <(find out/classes -name '*.class' -print)
+          "$BT/d8"             --lib "$ANDROID_JAR"             --min-api 26             --output out/dex             "${CLASS_FILES[@]}"
+
+          "$BT/aapt2" link             -o out/AETHER-unsigned.apk             -I "$ANDROID_JAR"             --manifest AndroidManifest.xml             --min-sdk-version 26             --target-sdk-version 35             --version-code 1             --version-name 0.1.0
+
+          zip -j out/AETHER-unsigned.apk out/dex/classes.dex
+          "$BT/zipalign" -f -p 4 out/AETHER-unsigned.apk out/AETHER-aligned.apk
+
+          keytool -genkeypair             -keystore out/debug.keystore             -storepass android             -keypass android             -alias aether             -dname "CN=AETHER,O=Prototype,C=SG"             -keyalg RSA             -keysize 2048             -validity 10000
+
+          "$BT/apksigner" sign             --ks out/debug.keystore             --ks-key-alias aether             --ks-pass pass:android             --key-pass pass:android             --out out/AETHER-debug.apk             out/AETHER-aligned.apk
+
+          "$BT/apksigner" verify --verbose out/AETHER-debug.apk
+
+      - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: AETHER-debug-apk
-          path: aether-android/app/build/outputs/apk/debug/app-debug.apk
+          name: AETHER-android-apk
+          path: aether-native/out/AETHER-debug.apk
           if-no-files-found: error
