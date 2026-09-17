@@ -272,14 +272,14 @@ public class MainActivity extends Activity implements SensorEventListener {
             "  float outer=band(body-.015,.012);\n" +
             "\n" +
             "  // Brushed black-metal substrate.\n" +
-            "  float brush=.5+.5*sin((q.y+fbm(q*13.0+uTime*.035)*.018)*980.0);\n" +
+            "  float brush=.5+.5*sin((q.y+noise(q*19.0+uTime*.035)*.014)*980.0);\n" +
             "  brush=pow(brush,15.0);\n" +
             "  float cloudy=fbm(q*5.1+vec2(uTime*.018,-uTime*.011));\n" +
             "  vec3 metal=mix(vec3(.012,.014,.017),vec3(.055,.058,.061),clamp(.18+cloudy*.62,0.0,1.0));\n" +
             "  metal+=brush*vec3(.07,.066,.055);\n" +
             "\n" +
             "  // A pseudo-normal creates a real object-like highlight that follows touch/tilt.\n" +
-            "  vec2 n2=normalize(vec2(q.x/.235,q.y/.335)+1e-4);\n" +
+            "  vec2 n2=normalize(vec2(q.x/.235,q.y/.335)+vec2(1e-4));\n" +
             "  vec2 lightDir=normalize(vec2(-.65+.22*uTilt.x,.76+.12*uTilt.y));\n" +
             "  float spec=pow(max(0.0,dot(n2,lightDir)*.5+.5),18.0);\n" +
             "  float fres=pow(clamp(1.0-length(q/vec2(.28,.39))*.72,0.0,1.0),2.0);\n" +
