@@ -6,6 +6,7 @@ on:
       - aether-android-showcase
     paths:
       - 'aether-native/src/**'
+      - 'aether-native/res/**'
       - 'aether-native/AndroidManifest.xml'
       - '.github/workflows/aether-android.yml'
   workflow_dispatch:
@@ -52,16 +53,19 @@ jobs:
           mapfile -t CLASS_FILES < <(find out/classes -name '*.class' -print)
           "$BT/d8"             --lib "$ANDROID_JAR"             --min-api 26             --output out/dex             "${CLASS_FILES[@]}"
 
-          "$BT/aapt2" link             -o out/AETHER-unsigned.apk             -I "$ANDROID_JAR"             --manifest AndroidManifest.xml             --min-sdk-version 26             --target-sdk-version 35             --version-code 1             --version-name 0.1.0
+          "$BT/aapt2" compile             --dir res             -o out/resources.zip
+
+          "$BT/aapt2" link             -o out/AETHER-unsigned.apk             -I "$ANDROID_JAR"             --manifest AndroidManifest.xml             -R out/resources.zip             --min-sdk-version 26             --target-sdk-version 35             --version-code 2             --version-name 0.2.0
 
           zip -j out/AETHER-unsigned.apk out/dex/classes.dex
           "$BT/zipalign" -f -p 4 out/AETHER-unsigned.apk out/AETHER-aligned.apk
 
-          keytool -genkeypair             -keystore out/debug.keystore             -storepass android             -keypass android             -alias aether             -dname "CN=AETHER,O=Prototype,C=SG"             -keyalg RSA             -keysize 2048             -validity 10000
+          keytool -genkeypair             -keystore out/debug.keystore             -storepass android             -keypass android             -alias aether             -dname "CN=AETHER,O=NOEMA Prototype,C=SG"             -keyalg RSA             -keysize 2048             -validity 10000
 
           "$BT/apksigner" sign             --ks out/debug.keystore             --ks-key-alias aether             --ks-pass pass:android             --key-pass pass:android             --out out/AETHER-debug.apk             out/AETHER-aligned.apk
 
           "$BT/apksigner" verify --verbose out/AETHER-debug.apk
+          "$BT/aapt2" dump badging out/AETHER-debug.apk | head -40
 
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
@@ -80,5 +84,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add aether-native/releases/AETHER-debug.apk
-          git commit -m "AETHER native: publish debug APK [skip ci]" || exit 0
+          git commit -m "AETHER v0.2: publish installable APK [skip ci]" || exit 0
           git push origin HEAD:aether-android-showcase
