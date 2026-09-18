@@ -550,6 +550,9 @@ public class MainActivity extends Activity implements SensorEventListener {
             "  vec2 frag=vUv*uResolution;\n" +
             "  vec2 p=(frag-.5*uResolution)/uResolution.y;\n" +
             "  float aspect=uResolution.x/uResolution.y;\n" +
+            "  float impact=exp(-clamp(uRelease,0.0,1.0)*5.4)*smoothstep(.56,1.0,uEnergy);\n" +
+            "  p*=1.0+impact*.048;\n" +
+            "  p.x+=sin(p.y*15.0+uTime*11.0)*impact*.0065;\n" +
             "  float boot=smoothstep(.18,1.0,min(1.0,uTime/2.55));\n" +
             "  float unveil=smoothstep(.0,1.0,min(1.0,max(0.0,(uTime-.72)/1.8)));\n" +
             "\n" +
@@ -563,7 +566,8 @@ public class MainActivity extends Activity implements SensorEventListener {
             "\n" +
             "  vec2 center=vec2(uTilt.x*.018+uDrag.x*.055, uTilt.y*.012+uDrag.y*.038);\n" +
             "  vec2 q=p-center;\n" +
-            "  float releaseKick=sin(clamp(uRelease,0.0,1.0)*3.14159265)*(1.0-.28*uRelease)*uEnergy;\n" +
+            "  float releaseArc=sin(clamp(uRelease,0.0,1.0)*3.14159265)*(1.0-.28*uRelease);\n" +
+            "  float releaseKick=max(releaseArc,impact*.92)*uEnergy;\n" +
             "  float side=sign(q.x+1e-5);\n" +
             "  q.x-=side*releaseKick*.045;\n" +
             "  q.y+=side*releaseKick*.012*sin(q.y*12.0);\n" +
@@ -626,6 +630,9 @@ public class MainActivity extends Activity implements SensorEventListener {
             "  col+=wave*vec3(.76,.70,.57)*.46;\n" +
             "  float blackout=(1.0-uRelease)*uRelease*4.0;\n" +
             "  col*=1.0-blackout*.14;\n" +
+            "  float pressure=impact*(1.0-smoothstep(.05,.62,rr));\n" +
+            "  col*=1.0-pressure*.32;\n" +
+            "  col+=vec3(1.0,.77,.46)*impact*exp(-rr*11.0)*.10;\n" +
             "\n" +
             "  // Tiny material grain; not stars or HUD particles.\n" +
             "  float grain=hash21(frag+vec2(floor(uTime*60.0)));\n" +
@@ -727,8 +734,8 @@ public class MainActivity extends Activity implements SensorEventListener {
             pressed=false;
             lastEnergy=energy;
             releaseAt=SystemClock.uptimeMillis();
-            inertiaVX=velocityX*6.8f*(.45f+.75f*energy);
-            inertiaVY=velocityY*6.8f*(.45f+.75f*energy);
+            inertiaVX=velocityX*.16f*(.45f+.75f*energy);
+            inertiaVY=velocityY*.16f*(.45f+.75f*energy);
         }
 
         private static int makeProgram(String vs,String fs){
