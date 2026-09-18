@@ -13,6 +13,7 @@ import android.view.*;
 import android.content.*;
 import android.hardware.*;
 import android.opengl.*;
+import android.media.*;
 import java.nio.*;
 import java.util.Locale;
 
@@ -20,6 +21,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     private SensorManager sensorManager;
     private AetherGLView glView;
     private OverlayView overlay;
+    private SoundEngine sound;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -28,6 +30,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         getWindow().setBackgroundDrawable(new ColorDrawable(Color.rgb(2, 2, 3)));
         immersive();
 
+        sound = new SoundEngine();
         android.widget.FrameLayout root = new android.widget.FrameLayout(this);
         glView = new AetherGLView(this);
         overlay = new OverlayView(this, glView);
@@ -40,6 +43,9 @@ public class MainActivity extends Activity implements SensorEventListener {
         setContentView(root);
 
         sensorManager = (SensorManager)getSystemService(Context.SENSOR_SERVICE);
+        glView.postDelayed(new Runnable() {
+            @Override public void run() { if (sound != null) sound.playBoot(); }
+        }, 150);
     }
 
     private void immersive() {
@@ -67,8 +73,17 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     @Override protected void onPause() {
         sensorManager.unregisterListener(this);
+        if (sound != null) sound.stopCharge();
         glView.onPause();
         super.onPause();
+    }
+
+    @Override protected void onDestroy() {
+        if (sound != null) {
+            sound.releaseAll();
+            sound = null;
+        }
+        super.onDestroy();
     }
 
     @Override public void onSensorChanged(SensorEvent e) {
@@ -124,6 +139,257 @@ public class MainActivity extends Activity implements SensorEventListener {
         return Math.max(a, Math.min(b, v));
     }
 
+
+    static final class SoundEngine {
+        private static final int SR = 48000;
+        private AudioTrack boot;
+        private AudioTrack catchTrack;
+        private AudioTrack charge;
+        private AudioTrack thresholdA;
+        private AudioTrack thresholdB;
+        private AudioTrack releaseLight;
+        private AudioTrack releaseFull;
+        private int noiseState = 0x5A17C9E3;
+
+        SoundEngine() {
+            boot = makeTrack(synthBoot());
+            catchTrack = makeTrack(synthCatch());
+            charge = makeTrack(synthCharge());
+            thresholdA = makeTrack(synthThreshold(false));
+            thresholdB = makeTrack(synthThreshold(true));
+            releaseLight = makeTrack(synthRelease(false));
+            releaseFull = makeTrack(synthRelease(true));
+        }
+
+        void playBoot() { play(boot, 0f, .56f); }
+
+        void catchPress(float pan) {
+            play(catchTrack, pan, .68f);
+        }
+
+        void startCharge(float pan) {
+            play(charge, pan, .42f);
+        }
+
+        void stopCharge() {
+            stop(charge);
+        }
+
+        void threshold(int level, float pan) {
+            play(level >= 2 ? thresholdB : thresholdA, pan, level >= 2 ? .62f : .48f);
+        }
+
+        void release(float energy, float pan, float speed) {
+            stopCharge();
+            float gain = .58f + .35f * energy + Math.min(.10f, speed * .025f);
+            if (energy > .67f) play(releaseFull, pan, gain);
+            else play(releaseLight, pan, gain * (.72f + energy * .32f));
+        }
+
+        void releaseAll() {
+            AudioTrack[] tracks = {boot, catchTrack, charge, thresholdA, thresholdB, releaseLight, releaseFull};
+            for (AudioTrack t : tracks) {
+                if (t == null) continue;
+                try { t.stop(); } catch (Throwable ignored) {}
+                try { t.release(); } catch (Throwable ignored) {}
+            }
+        }
+
+        private void play(AudioTrack track, float pan, float gain) {
+            if (track == null || track.getState() != AudioTrack.STATE_INITIALIZED) return;
+            pan = clamp(pan, -1f, 1f);
+            gain = clamp(gain, 0f, 1f);
+            float left = gain * (pan > 0f ? 1f - pan * .72f : 1f);
+            float right = gain * (pan < 0f ? 1f + pan * .72f : 1f);
+            try {
+                if (track.getPlayState() == AudioTrack.PLAYSTATE_PLAYING) track.stop();
+                track.reloadStaticData();
+                track.setPlaybackHeadPosition(0);
+                track.setStereoVolume(left, right);
+                track.play();
+            } catch (Throwable ignored) {}
+        }
+
+        private void stop(AudioTrack track) {
+            if (track == null) return;
+            try {
+                if (track.getPlayState() == AudioTrack.PLAYSTATE_PLAYING) track.stop();
+                track.setPlaybackHeadPosition(0);
+            } catch (Throwable ignored) {}
+        }
+
+        private AudioTrack makeTrack(short[] pcm) {
+            if (pcm == null || pcm.length == 0) return null;
+            try {
+                AudioAttributes attrs = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_GAME)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build();
+                AudioFormat format = new AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(SR)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                    .build();
+                AudioTrack t = new AudioTrack.Builder()
+                    .setAudioAttributes(attrs)
+                    .setAudioFormat(format)
+                    .setBufferSizeInBytes(pcm.length * 2)
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .build();
+                t.write(pcm, 0, pcm.length, AudioTrack.WRITE_BLOCKING);
+                return t;
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+
+        private short[] synthBoot() {
+            float seconds = 2.45f;
+            int frames = (int)(SR * seconds);
+            short[] out = new short[frames * 2];
+            double phaseSub = 0, phaseAir = 0;
+            for (int i = 0; i < frames; i++) {
+                float t = i / (float)SR;
+                float r = t / seconds;
+                float in = smooth01(r / .16f);
+                float outEnv = 1f - smooth01((r - .79f) / .21f);
+                float env = in * outEnv;
+                float f = 31f + 19f * r * r;
+                phaseSub += 2.0 * Math.PI * f / SR;
+                phaseAir += 2.0 * Math.PI * (176f + 34f * r) / SR;
+                float pressure = (float)Math.sin(phaseSub) * (.10f + .09f * r);
+                float air = (float)Math.sin(phaseAir) * .025f;
+                float seam = pulse(t, .57f, .055f) * ((float)Math.sin(2*Math.PI*880*t) * .11f + noise() * .035f);
+                float lock = pulse(t, 1.78f, .11f) * ((float)Math.sin(2*Math.PI*264*t) * .075f);
+                put(out, i, softClip((pressure + air + seam + lock) * env));
+            }
+            return out;
+        }
+
+        private short[] synthCatch() {
+            float seconds = .16f;
+            int frames = (int)(SR * seconds);
+            short[] out = new short[frames * 2];
+            double p1 = 0, p2 = 0;
+            for (int i = 0; i < frames; i++) {
+                float t = i / (float)SR;
+                float env = (float)Math.exp(-t * 27f);
+                p1 += 2.0 * Math.PI * (64f - 22f * t) / SR;
+                p2 += 2.0 * Math.PI * (920f - 470f * t) / SR;
+                float low = (float)Math.sin(p1) * .56f;
+                float metal = (float)Math.sin(p2) * .16f;
+                float crack = noise() * (float)Math.exp(-t * 72f) * .15f;
+                put(out, i, softClip((low + metal + crack) * env));
+            }
+            return out;
+        }
+
+        private short[] synthCharge() {
+            float seconds = 1.24f;
+            int frames = (int)(SR * seconds);
+            short[] out = new short[frames * 2];
+            double sub = 0, mid = 0, tension = 0;
+            for (int i = 0; i < frames; i++) {
+                float t = i / (float)SR;
+                float r = t / seconds;
+                float env = smooth01(r / .08f) * (1f - .13f * smooth01((r - .94f) / .06f));
+                float fSub = 38f + 31f * r * r;
+                float fMid = 156f + 116f * r * r;
+                float fT = 412f + 480f * r * r * r;
+                sub += 2.0 * Math.PI * fSub / SR;
+                mid += 2.0 * Math.PI * fMid / SR;
+                tension += 2.0 * Math.PI * fT / SR;
+                float beating = .75f + .25f * (float)Math.sin(2*Math.PI*(2.2f + 3.4f*r)*t);
+                float x =
+                    (float)Math.sin(sub) * (.045f + .16f * r) +
+                    (float)Math.sin(mid) * (.018f + .055f * r*r) +
+                    (float)Math.sin(tension) * (.008f + .035f * r*r*r);
+                x *= beating * env;
+                put(out, i, softClip(x));
+            }
+            return out;
+        }
+
+        private short[] synthThreshold(boolean high) {
+            float seconds = high ? .19f : .135f;
+            int frames = (int)(SR * seconds);
+            short[] out = new short[frames * 2];
+            double a = 0, b = 0;
+            for (int i = 0; i < frames; i++) {
+                float t = i / (float)SR;
+                float env = (float)Math.exp(-t * (high ? 20f : 30f));
+                float f1 = high ? 1240f : 520f;
+                float f2 = high ? 420f : 190f;
+                a += 2.0 * Math.PI * f1 / SR;
+                b += 2.0 * Math.PI * f2 / SR;
+                float x = (float)Math.sin(a) * (high ? .16f : .11f)
+                        + (float)Math.sin(b) * (high ? .13f : .08f)
+                        + noise() * (float)Math.exp(-t*85f) * .045f;
+                put(out, i, softClip(x * env));
+            }
+            return out;
+        }
+
+        private short[] synthRelease(boolean full) {
+            float seconds = full ? .82f : .34f;
+            int frames = (int)(SR * seconds);
+            short[] out = new short[frames * 2];
+            double sub = 0, body = 0, glass = 0;
+            for (int i = 0; i < frames; i++) {
+                float t = i / (float)SR;
+                float r = t / seconds;
+                float fSub = (full ? 78f : 68f) * (1f - .56f * r) + 5f;
+                float fBody = (full ? 238f : 205f) * (1f - .20f * r);
+                float fGlass = full ? 1460f - 520f * r : 880f - 180f * r;
+                sub += 2.0*Math.PI*fSub/SR;
+                body += 2.0*Math.PI*fBody/SR;
+                glass += 2.0*Math.PI*fGlass/SR;
+
+                float subEnv = (float)Math.exp(-t * (full ? 4.2f : 8.5f));
+                float bodyEnv = (float)Math.exp(-t * (full ? 8.0f : 13f));
+                float glassEnv = (float)Math.exp(-t * (full ? 6.6f : 12f));
+                float crack = noise() * (float)Math.exp(-t * 52f) * (full ? .24f : .12f);
+                float whoosh = noise() * smooth01(r/.10f) * (1f-smooth01((r-.48f)/.52f)) * (full ? .045f : .018f);
+                float x =
+                    (float)Math.sin(sub) * .72f * subEnv +
+                    (float)Math.sin(body) * .16f * bodyEnv +
+                    (float)Math.sin(glass) * .11f * glassEnv +
+                    crack + whoosh;
+                if (full) x += pulse(t,.115f,.055f) * (float)Math.sin(2*Math.PI*2670*t) * .095f;
+                put(out, i, softClip(x));
+            }
+            return out;
+        }
+
+        private void put(short[] out, int frame, float sample) {
+            short s = (short)(clamp(sample, -1f, 1f) * 32767f);
+            int j = frame * 2;
+            out[j] = s;
+            out[j+1] = s;
+        }
+
+        private float noise() {
+            noiseState ^= noiseState << 13;
+            noiseState ^= noiseState >>> 17;
+            noiseState ^= noiseState << 5;
+            return ((noiseState & 0x7fffffff) / 1073741824f) - 1f;
+        }
+
+        private static float smooth01(float x) {
+            x = clamp(x, 0f, 1f);
+            return x*x*(3f-2f*x);
+        }
+
+        private static float pulse(float t, float center, float width) {
+            float x = (t-center)/Math.max(.0001f,width);
+            return (float)Math.exp(-x*x*3.2f);
+        }
+
+        private static float softClip(float x) {
+            return (float)Math.tanh(x * 1.25f) * .82f;
+        }
+    }
+
     public static class AetherGLView extends GLSurfaceView {
         final AetherRenderer renderer;
         private final MainActivity activity;
@@ -155,6 +421,11 @@ public class MainActivity extends Activity implements SensorEventListener {
                 lastY = y;
                 thresholdOne = thresholdTwo = false;
                 renderer.onDown(x / Math.max(1f,getWidth()), 1f - y / Math.max(1f,getHeight()));
+                float pan = (x / Math.max(1f,getWidth()) - .5f) * 2f;
+                if (activity.sound != null) {
+                    activity.sound.catchPress(pan);
+                    activity.sound.startCharge(pan);
+                }
                 activity.tactileTick(42);
 
                 final long stamp = downAt;
@@ -162,6 +433,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                     @Override public void run() {
                         if (renderer.pressed && downAt == stamp && !thresholdOne) {
                             thresholdOne = true;
+                            if (activity.sound != null) activity.sound.threshold(1, (lastX / Math.max(1f,getWidth()) - .5f) * 2f);
                             activity.tactileTick(62);
                         }
                     }
@@ -170,6 +442,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                     @Override public void run() {
                         if (renderer.pressed && downAt == stamp && !thresholdTwo) {
                             thresholdTwo = true;
+                            if (activity.sound != null) activity.sound.threshold(2, (lastX / Math.max(1f,getWidth()) - .5f) * 2f);
                             activity.tactileTick(108);
                         }
                     }
@@ -193,10 +466,12 @@ public class MainActivity extends Activity implements SensorEventListener {
                 float energy = Math.min(1f, (now - downAt) / 1150f);
                 if (!thresholdOne && energy > .38f) {
                     thresholdOne = true;
+                    if (activity.sound != null) activity.sound.threshold(1, (x / Math.max(1f,getWidth()) - .5f) * 2f);
                     activity.tactileTick(62);
                 }
                 if (!thresholdTwo && energy > .78f) {
                     thresholdTwo = true;
+                    if (activity.sound != null) activity.sound.threshold(2, (x / Math.max(1f,getWidth()) - .5f) * 2f);
                     activity.tactileTick(105);
                 }
                 return true;
@@ -204,7 +479,16 @@ public class MainActivity extends Activity implements SensorEventListener {
 
             if (e.getActionMasked() == MotionEvent.ACTION_UP || e.getActionMasked() == MotionEvent.ACTION_CANCEL) {
                 float energy = Math.min(1f, Math.max(0f, (now - downAt) / 1150f));
+                float speed = Math.min(8f, (float)Math.hypot(renderer.velocityX, renderer.velocityY));
                 renderer.onUp(energy);
+                if (activity.sound != null) {
+                    if (e.getActionMasked() == MotionEvent.ACTION_UP) {
+                        float pan = (x / Math.max(1f,getWidth()) - .5f) * 2f;
+                        activity.sound.release(energy, pan, speed);
+                    } else {
+                        activity.sound.stopCharge();
+                    }
+                }
                 if (e.getActionMasked() == MotionEvent.ACTION_UP) activity.tactileRelease(energy);
                 return true;
             }
